@@ -33,12 +33,26 @@ jobs:
         uses: android-actions/setup-android@v3
 
       - name: Install Android SDK and NDK
+        shell: bash
         run: |
+          set +e
           yes | sdkmanager --licenses >/dev/null
+          license_status=( "${PIPESTATUS[@]}" )
+          set -e
+
+          if [[ "${license_status[1]}" -ne 0 ]]; then
+            echo "Android SDK license acceptance failed." >&2
+            exit "${license_status[1]}"
+          fi
+
           sdkmanager --install \
             "platforms;android-35" \
             "build-tools;35.0.0" \
             "ndk;29.0.14206865"
+
+          test -f "$ANDROID_HOME/platforms/android-35/android.jar"
+          test -x "$ANDROID_HOME/build-tools/35.0.0/aapt2"
+          test -x "$ANDROID_HOME/ndk/29.0.14206865/toolchains/llvm/prebuilt/linux-x86_64/bin/aarch64-linux-android23-clang"
 
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
@@ -65,29 +79,31 @@ jobs:
           if-no-files-found: error
           retention-days: 14
 
-      - name: Record successful build for automatic artifact retrieval
-        if: success()
+      - name: Record build result for automatic APK retrieval
+        if: always()
         uses: actions/github-script@v7
         env:
+          BUILD_OUTCOME: ${{ job.status }}
           ARTIFACT_ID: ${{ steps.upload-apk.outputs.artifact-id }}
         with:
           script: |
             const path = "CI_BUILD_STATUS.json";
-            const artifactId = Number(process.env.ARTIFACT_ID);
-            if (!Number.isSafeInteger(artifactId) || artifactId <= 0) {
-              throw new Error("GitHub did not return a valid APK artifact ID.");
-            }
+            const rawArtifactId = process.env.ARTIFACT_ID || "";
+            const artifactId = Number(rawArtifactId);
+            const successful = process.env.BUILD_OUTCOME === "success"
+              && Number.isSafeInteger(artifactId)
+              && artifactId > 0;
 
             const body = {
-              status: "success",
+              status: successful ? "success" : "failure",
               run_id: context.runId,
               run_number: context.runNumber,
               run_url: `https://github.com/${context.repo.owner}/${context.repo.repo}/actions/runs/${context.runId}`,
               source_commit: context.sha,
-              artifact_id: artifactId,
-              artifact_name: `RUSTBLEND-Android-APK-${context.runNumber}`,
-              apk_file: "RUSTBLEND.apk",
-              retention_days: 14
+              artifact_id: successful ? artifactId : null,
+              artifact_name: successful ? `RUSTBLEND-Android-APK-${context.runNumber}` : null,
+              apk_file: successful ? "RUSTBLEND.apk" : null,
+              retention_days: successful ? 14 : null
             };
 
             let sha;
@@ -108,7 +124,7 @@ jobs:
             await github.rest.repos.createOrUpdateFileContents({
               ...context.repo,
               path,
-              message: `ci: record successful Android build ${context.runNumber}`,
+              message: `ci: record Android build ${body.status} ${context.runNumber}`,
               content: Buffer.from(JSON.stringify(body, null, 2) + "\n").toString("base64"),
               branch: "main",
               ...(sha ? { sha } : {})
