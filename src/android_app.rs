@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use std::sync::Arc;
 
 use crate::gpu::GpuRenderer;
 
 use winit::{
     application::ApplicationHandler,
-    event::WindowEvent,
+    event::{TouchPhase, WindowEvent},
     event_loop::{
         ActiveEventLoop,
         ControlFlow,
@@ -24,6 +25,72 @@ use winit::{
 struct RustBlendApp {
     window: Option<Arc<Window>>,
     renderer: Option<GpuRenderer>,
+    touches: HashMap<u64, (f64, f64)>,
+}
+
+impl RustBlendApp {
+    fn handle_touch(
+        &mut self,
+        phase: TouchPhase,
+        id: u64,
+        position: (f64, f64),
+    ) {
+        match phase {
+            TouchPhase::Started => {
+                self.touches.insert(id, position);
+            }
+
+            TouchPhase::Moved => {
+                let previous = self.touches.get(&id).copied();
+                self.touches.insert(id, position);
+
+                let Some(previous) = previous else {
+                    return;
+                };
+
+                if self.touches.len() == 1 {
+                    let delta_x = (position.0 - previous.0) as f32;
+                    let delta_y = (position.1 - previous.1) as f32;
+
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.orbit_camera(
+                            -delta_x * 0.006,
+                            -delta_y * 0.006,
+                        );
+                    }
+                } else if self.touches.len() == 2 {
+                    let other = self.touches.iter()
+                        .find_map(|(&other_id, &other_position)| {
+                            (other_id != id).then_some(other_position)
+                        });
+
+                    if let Some(other) = other {
+                        let old_distance = distance(previous, other);
+                        let new_distance = distance(position, other);
+
+                        if old_distance > 1.0 && new_distance > 1.0 {
+                            let factor = (old_distance / new_distance)
+                                .clamp(0.75, 1.33) as f32;
+
+                            if let Some(renderer) = self.renderer.as_mut() {
+                                renderer.zoom_camera(factor);
+                            }
+                        }
+                    }
+                }
+            }
+
+            TouchPhase::Ended | TouchPhase::Cancelled => {
+                self.touches.remove(&id);
+            }
+        }
+    }
+}
+
+fn distance(a: (f64, f64), b: (f64, f64)) -> f64 {
+    let dx = a.0 - b.0;
+    let dy = a.1 - b.1;
+    (dx * dx + dy * dy).sqrt()
 }
 
 impl ApplicationHandler for RustBlendApp {
@@ -36,7 +103,7 @@ impl ApplicationHandler for RustBlendApp {
 
         let window = match event_loop.create_window(
             Window::default_attributes()
-                .with_title("RUSTBLEND")
+                .with_title("RUSTBLEND 3D Viewport")
         ) {
             Ok(window) => Arc::new(window),
 
@@ -49,7 +116,7 @@ impl ApplicationHandler for RustBlendApp {
 
         let display = event_loop.owned_display_handle();
 
-        eprintln!("RUSTBLEND: Initializing GPU renderer.");
+        eprintln!("RUSTBLEND: Initializing 3D viewport.");
 
         let renderer = pollster::block_on(
             GpuRenderer::new(display, window.clone())
@@ -63,25 +130,27 @@ impl ApplicationHandler for RustBlendApp {
                     &format!("RUSTBLEND | {gpu_name}")
                 );
 
-                eprintln!("RUSTBLEND: GPU renderer ready: {gpu_name}");
+                eprintln!(
+                    "RUSTBLEND: 3D viewport ready on {gpu_name}; objects={}.",
+                    renderer.scene_object_count()
+                );
 
                 self.window = Some(window.clone());
                 self.renderer = Some(renderer);
+                self.touches.clear();
 
-                // Continuous redraw is paced by the surface's VSync mode.
                 event_loop.set_control_flow(ControlFlow::Poll);
                 window.request_redraw();
             }
 
             Err(error) => {
-                eprintln!("RUSTBLEND: GPU initialization failed: {error}");
+                eprintln!("RUSTBLEND: 3D viewport initialization failed: {error}");
 
-                window.set_title("RUSTBLEND - GPU INITIALIZATION FAILED");
+                window.set_title("RUSTBLEND - VIEWPORT ERROR");
 
                 self.window = Some(window);
                 self.renderer = None;
 
-                // Do not spin the CPU when the renderer could not start.
                 event_loop.set_control_flow(ControlFlow::Wait);
             }
         }
@@ -93,6 +162,7 @@ impl ApplicationHandler for RustBlendApp {
         event_loop.set_control_flow(ControlFlow::Wait);
         self.renderer = None;
         self.window = None;
+        self.touches.clear();
     }
 
     fn window_event(
@@ -101,11 +171,11 @@ impl ApplicationHandler for RustBlendApp {
         window_id: WindowId,
         event: WindowEvent,
     ) {
-        let Some(window) = self.window.as_ref() else {
-            return;
-        };
+        let correct_window = self.window
+            .as_ref()
+            .is_some_and(|window| window.id() == window_id);
 
-        if window.id() != window_id {
+        if !correct_window {
             return;
         }
 
@@ -117,6 +187,22 @@ impl ApplicationHandler for RustBlendApp {
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.resize(size);
+                }
+            }
+
+            WindowEvent::Touch(touch) => {
+                let position = (
+                    touch.location.x,
+                    touch.location.y,
+                );
+
+                self.handle_touch(
+                    touch.phase,
+                    touch.id,
+                    position,
+                );
+
+                if let Some(window) = self.window.as_ref() {
                     window.request_redraw();
                 }
             }
@@ -125,9 +211,9 @@ impl ApplicationHandler for RustBlendApp {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.render();
 
-                    // Keep requesting frames so a transient first-frame or
-                    // surface-acquisition timeout cannot leave the app black.
-                    window.request_redraw();
+                    if let Some(window) = self.window.as_ref() {
+                        window.request_redraw();
+                    }
                 }
             }
 

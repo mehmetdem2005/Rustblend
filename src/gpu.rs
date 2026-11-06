@@ -1,55 +1,109 @@
 use std::borrow::Cow;
 use std::sync::Arc;
 
+use crate::{
+    camera::Camera,
+    geometry::Mesh,
+    math::{Mat4, Quaternion, Vec3},
+    render::RenderPacket,
+    scene::{Scene, Transform},
+};
+
 use winit::{
     dpi::PhysicalSize,
     event_loop::OwnedDisplayHandle,
     window::Window,
 };
 
-const TRIANGLE_SHADER: &str = r#"
+const MESH_SHADER: &str = r#"
+struct CameraUniform {
+    view_projection: mat4x4<f32>,
+};
+
+@group(0) @binding(0)
+var<uniform> camera: CameraUniform;
+
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(1) normal: vec3<f32>,
+    @location(2) color: vec3<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) normal: vec3<f32>,
+    @location(1) color: vec3<f32>,
+};
+
+@vertex
+fn vs_main(input: VertexInput) -> VertexOutput {
+    var output: VertexOutput;
+    output.position = camera.view_projection * vec4<f32>(input.position, 1.0);
+    output.normal = input.normal;
+    output.color = input.color;
+    return output;
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    let normal = normalize(input.normal);
+    let light_direction = normalize(vec3<f32>(-0.45, 0.82, 0.36));
+    let diffuse = max(dot(normal, light_direction), 0.0);
+    let lighting = 0.28 + diffuse * 0.72;
+    return vec4<f32>(input.color * lighting, 1.0);
+}
+"#;
+
+const LINE_SHADER: &str = r#"
+struct CameraUniform {
+    view_projection: mat4x4<f32>,
+};
+
+@group(0) @binding(0)
+var<uniform> camera: CameraUniform;
+
+struct VertexInput {
+    @location(0) position: vec3<f32>,
+    @location(2) color: vec3<f32>,
+};
+
 struct VertexOutput {
     @builtin(position) position: vec4<f32>,
     @location(0) color: vec3<f32>,
 };
 
 @vertex
-fn vs_main(
-    @builtin(vertex_index) index: u32
-) -> VertexOutput {
-
-    let positions = array<vec2<f32>, 3>(
-        vec2<f32>(0.0, 0.65),
-        vec2<f32>(-0.65, -0.55),
-        vec2<f32>(0.65, -0.55)
-    );
-
-    let colors = array<vec3<f32>, 3>(
-        vec3<f32>(1.0, 0.15, 0.25),
-        vec3<f32>(0.1, 0.65, 1.0),
-        vec3<f32>(0.2, 1.0, 0.55)
-    );
-
+fn vs_main(input: VertexInput) -> VertexOutput {
     var output: VertexOutput;
-
-    output.position = vec4<f32>(
-        positions[index],
-        0.0,
-        1.0
-    );
-
-    output.color = colors[index];
-
+    output.position = camera.view_projection * vec4<f32>(input.position, 1.0);
+    output.color = input.color;
     return output;
 }
 
 @fragment
-fn fs_main(
-    input: VertexOutput
-) -> @location(0) vec4<f32> {
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
     return vec4<f32>(input.color, 1.0);
 }
 "#;
+
+const VERTEX_STRIDE: u64 = 9 * 4;
+const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
+
+const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
+    wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3];
+
+const LINE_ATTRIBUTES: [wgpu::VertexAttribute; 2] = [
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 0,
+        shader_location: 0,
+    },
+    wgpu::VertexAttribute {
+        format: wgpu::VertexFormat::Float32x3,
+        offset: 24,
+        shader_location: 2,
+    },
+];
 
 pub struct GpuRenderer {
     instance: wgpu::Instance,
@@ -59,9 +113,25 @@ pub struct GpuRenderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
 
-    pipeline: wgpu::RenderPipeline,
-    window: Arc<Window>,
+    mesh_pipeline: wgpu::RenderPipeline,
+    line_pipeline: wgpu::RenderPipeline,
 
+    camera: Camera,
+    camera_buffer: wgpu::Buffer,
+    camera_bind_group: wgpu::BindGroup,
+
+    mesh_vertex_buffer: wgpu::Buffer,
+    mesh_index_buffer: wgpu::Buffer,
+    mesh_index_count: u32,
+
+    line_vertex_buffer: wgpu::Buffer,
+    line_vertex_count: u32,
+
+    depth_texture: wgpu::Texture,
+    depth_view: wgpu::TextureView,
+
+    scene: Scene,
+    window: Arc<Window>,
     adapter_name: String,
     first_frame_presented: bool,
 }
@@ -78,19 +148,15 @@ impl GpuRenderer {
                 Box::new(display)
             );
 
-        // Prefer the native Vulkan driver when available, while retaining
-        // OpenGL ES as a fallback for Android devices with limited Vulkan support.
         instance_desc.backends =
             wgpu::Backends::VULKAN | wgpu::Backends::GL;
 
         let instance = wgpu::Instance::new(instance_desc);
 
-        eprintln!("RUSTBLEND GPU: creating Android surface.");
-
         let surface = instance
             .create_surface(window.clone())
-            .map_err(|e| {
-                format!("GPU surface creation failed: {e}")
+            .map_err(|error| {
+                format!("GPU surface creation failed: {error}")
             })?;
 
         eprintln!("RUSTBLEND GPU: requesting compatible adapter.");
@@ -103,8 +169,8 @@ impl GpuRenderer {
                 apply_limit_buckets: false,
             })
             .await
-            .map_err(|e| {
-                format!("No compatible GPU adapter found: {e}")
+            .map_err(|error| {
+                format!("No compatible GPU adapter found: {error}")
             })?;
 
         let adapter_info = adapter.get_info();
@@ -117,45 +183,98 @@ impl GpuRenderer {
         eprintln!("RUSTBLEND GPU: selected adapter {adapter_name}.");
 
         let (device, queue) = adapter
-            .request_device(
-                &wgpu::DeviceDescriptor::default()
-            )
+            .request_device(&wgpu::DeviceDescriptor::default())
             .await
-            .map_err(|e| {
-                format!("GPU device creation failed: {e}")
+            .map_err(|error| {
+                format!("GPU device creation failed: {error}")
             })?;
 
-        eprintln!("RUSTBLEND GPU: device created.");
-
         let size = window.inner_size();
+        let width = size.width.max(1);
+        let height = size.height.max(1);
 
         let mut surface_config = surface
-            .get_default_config(
-                &adapter,
-                size.width.max(1),
-                size.height.max(1),
-            )
+            .get_default_config(&adapter, width, height)
             .ok_or_else(|| {
                 "The selected GPU does not support the Android surface.".to_string()
             })?;
 
-        // FIFO is the portable Android presentation mode and is VSync paced.
         surface_config.present_mode = wgpu::PresentMode::Fifo;
-
         surface.configure(&device, &surface_config);
 
-        eprintln!(
-            "RUSTBLEND GPU: surface configured at {}x{} ({:?}).",
-            surface_config.width,
-            surface_config.height,
-            surface_config.format
+        let mut camera = Camera::new(
+            Vec3::new(0.0, 1.0, 0.0),
+            6.2,
+            width as f32 / height as f32,
+        )
+        .map_err(|error| format!("Camera creation failed: {error:?}"))?;
+
+        camera
+            .orbit(0.72, 0.50)
+            .map_err(|error| format!("Camera setup failed: {error:?}"))?;
+
+        let camera_bytes = f32_bytes(&camera.view_projection_matrix().elements);
+        let camera_buffer = buffer_from_bytes(
+            &device,
+            "RUSTBLEND Camera Uniform",
+            &camera_bytes,
+            wgpu::BufferUsages::UNIFORM | wgpu::BufferUsages::COPY_DST,
         );
 
-        let shader = device.create_shader_module(
+        let camera_bind_group_layout =
+            device.create_bind_group_layout(
+                &wgpu::BindGroupLayoutDescriptor {
+                    label: Some("RUSTBLEND Camera Bind Group Layout"),
+                    entries: &[
+                        wgpu::BindGroupLayoutEntry {
+                            binding: 0,
+                            visibility: wgpu::ShaderStages::VERTEX,
+                            ty: wgpu::BindingType::Buffer {
+                                ty: wgpu::BufferBindingType::Uniform,
+                                has_dynamic_offset: false,
+                                min_binding_size: None,
+                            },
+                            count: None,
+                        }
+                    ],
+                }
+            );
+
+        let camera_bind_group = device.create_bind_group(
+            &wgpu::BindGroupDescriptor {
+                label: Some("RUSTBLEND Camera Bind Group"),
+                layout: &camera_bind_group_layout,
+                entries: &[
+                    wgpu::BindGroupEntry {
+                        binding: 0,
+                        resource: camera_buffer.as_entire_binding(),
+                    }
+                ],
+            }
+        );
+
+        let pipeline_layout = device.create_pipeline_layout(
+            &wgpu::PipelineLayoutDescriptor {
+                label: Some("RUSTBLEND Viewport Pipeline Layout"),
+                bind_group_layouts: &[&camera_bind_group_layout],
+                push_constant_ranges: &[],
+            }
+        );
+
+        let mesh_shader = device.create_shader_module(
             wgpu::ShaderModuleDescriptor {
-                label: Some("RUSTBLEND Triangle Shader"),
+                label: Some("RUSTBLEND Mesh Shader"),
                 source: wgpu::ShaderSource::Wgsl(
-                    Cow::Borrowed(TRIANGLE_SHADER)
+                    Cow::Borrowed(MESH_SHADER)
+                ),
+            }
+        );
+
+        let line_shader = device.create_shader_module(
+            wgpu::ShaderModuleDescriptor {
+                label: Some("RUSTBLEND Grid and Edge Shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    Cow::Borrowed(LINE_SHADER)
                 ),
             }
         );
@@ -168,34 +287,147 @@ impl GpuRenderer {
             })
         ];
 
-        let pipeline = device.create_render_pipeline(
-            &wgpu::RenderPipelineDescriptor {
-                label: Some("RUSTBLEND Triangle Pipeline"),
-                layout: None,
+        let mesh_layout = [
+            wgpu::VertexBufferLayout {
+                array_stride: VERTEX_STRIDE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &MESH_ATTRIBUTES,
+            }
+        ];
 
+        let line_layout = [
+            wgpu::VertexBufferLayout {
+                array_stride: VERTEX_STRIDE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &LINE_ATTRIBUTES,
+            }
+        ];
+
+        let mesh_pipeline = device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("RUSTBLEND 3D Mesh Pipeline"),
+                layout: Some(&pipeline_layout),
                 vertex: wgpu::VertexState {
-                    module: &shader,
+                    module: &mesh_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &[],
+                    buffers: &mesh_layout,
                 },
-
                 fragment: Some(wgpu::FragmentState {
-                    module: &shader,
+                    module: &mesh_shader,
                     entry_point: Some("fs_main"),
                     compilation_options: Default::default(),
                     targets: &color_targets,
                 }),
-
-                primitive: wgpu::PrimitiveState::default(),
-                depth_stencil: None,
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::TriangleList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: true,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: Default::default(),
+                    bias: Default::default(),
+                }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview_mask: None,
                 cache: None,
             }
         );
 
-        eprintln!("RUSTBLEND GPU: triangle pipeline created.");
+        let line_pipeline = device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("RUSTBLEND Grid and Selection Pipeline"),
+                layout: Some(&pipeline_layout),
+                vertex: wgpu::VertexState {
+                    module: &line_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &line_layout,
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &line_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &color_targets,
+                }),
+                primitive: wgpu::PrimitiveState {
+                    topology: wgpu::PrimitiveTopology::LineList,
+                    cull_mode: None,
+                    ..Default::default()
+                },
+                depth_stencil: Some(wgpu::DepthStencilState {
+                    format: DEPTH_FORMAT,
+                    depth_write_enabled: false,
+                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    stencil: Default::default(),
+                    bias: wgpu::DepthBiasState {
+                        constant: 1,
+                        slope_scale: 1.0,
+                        clamp: 0.0,
+                    },
+                }),
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            }
+        );
+
+        let mut scene = Scene::new();
+        let cube = Mesh::cube(2.0)
+            .map_err(|error| format!("Default cube creation failed: {error:?}"))?;
+
+        let cube_transform = Transform::new(
+            Vec3::new(0.0, 1.0, 0.0),
+            Quaternion::IDENTITY,
+            Vec3::new(1.0, 1.0, 1.0),
+        )
+        .map_err(|error| format!("Default cube transform failed: {error:?}"))?;
+
+        let cube_id = scene
+            .add_object_with_transform("Cube", cube, cube_transform)
+            .map_err(|error| format!("Default scene creation failed: {error:?}"))?;
+
+        scene
+            .select(cube_id)
+            .map_err(|error| format!("Default cube selection failed: {error:?}"))?;
+
+        let packet = RenderPacket::from_scene(&scene)
+            .map_err(|error| format!("Default scene render conversion failed: {error:?}"))?;
+
+        let (mesh_vertices, mesh_indices) = build_mesh_buffers(&packet)?;
+        let mesh_vertex_buffer = buffer_from_bytes(
+            &device,
+            "RUSTBLEND Cube Vertex Buffer",
+            &f32_bytes(&mesh_vertices),
+            wgpu::BufferUsages::VERTEX,
+        );
+        let mesh_index_buffer = buffer_from_bytes(
+            &device,
+            "RUSTBLEND Cube Index Buffer",
+            &u32_bytes(&mesh_indices),
+            wgpu::BufferUsages::INDEX,
+        );
+
+        let (line_vertices, grid_vertex_count) = build_grid_and_edges(&scene)?;
+        let line_vertex_buffer = buffer_from_bytes(
+            &device,
+            "RUSTBLEND Grid and Cube Edges",
+            &f32_bytes(&line_vertices),
+            wgpu::BufferUsages::VERTEX,
+        );
+
+        let (depth_texture, depth_view) =
+            create_depth_resources(&device, width, height);
+
+        eprintln!(
+            "RUSTBLEND GPU: 3D viewport ready. objects={}, triangles={}, grid_vertices={}.",
+            packet.object_count(),
+            mesh_indices.len() / 3,
+            grid_vertex_count
+        );
 
         Ok(Self {
             instance,
@@ -203,7 +435,21 @@ impl GpuRenderer {
             surface_config,
             device,
             queue,
-            pipeline,
+            mesh_pipeline,
+            line_pipeline,
+            camera,
+            camera_buffer,
+            camera_bind_group,
+            mesh_vertex_buffer,
+            mesh_index_buffer,
+            mesh_index_count: u32::try_from(mesh_indices.len())
+                .map_err(|_| "Too many mesh indices.".to_string())?,
+            line_vertex_buffer,
+            line_vertex_count: u32::try_from(line_vertices.len() / 9)
+                .map_err(|_| "Too many viewport line vertices.".to_string())?,
+            depth_texture,
+            depth_view,
+            scene,
             window,
             adapter_name,
             first_frame_presented: false,
@@ -214,6 +460,39 @@ impl GpuRenderer {
         &self.adapter_name
     }
 
+    pub fn scene_object_count(&self) -> usize {
+        self.scene.object_count()
+    }
+
+    pub fn orbit_camera(
+        &mut self,
+        delta_yaw: f32,
+        delta_pitch: f32,
+    ) {
+        if self.camera.orbit(delta_yaw, delta_pitch).is_ok() {
+            self.update_camera_uniform();
+            self.window.request_redraw();
+        }
+    }
+
+    pub fn zoom_camera(&mut self, factor: f32) {
+        if self.camera.zoom(factor).is_ok() {
+            self.update_camera_uniform();
+            self.window.request_redraw();
+        }
+    }
+
+    fn update_camera_uniform(&mut self) {
+        let bytes = f32_bytes(
+            &self.camera.view_projection_matrix().elements
+        );
+        self.queue.write_buffer(
+            &self.camera_buffer,
+            0,
+            &bytes,
+        );
+    }
+
     pub fn resize(&mut self, size: PhysicalSize<u32>) {
         if size.width == 0 || size.height == 0 {
             return;
@@ -222,11 +501,22 @@ impl GpuRenderer {
         self.surface_config.width = size.width;
         self.surface_config.height = size.height;
 
+        self.camera
+            .set_viewport(size.width, size.height)
+            .ok();
+
         self.surface.configure(
             &self.device,
             &self.surface_config,
         );
 
+        let (depth_texture, depth_view) =
+            create_depth_resources(&self.device, size.width, size.height);
+
+        self.depth_texture = depth_texture;
+        self.depth_view = depth_view;
+
+        self.update_camera_uniform();
         self.window.request_redraw();
     }
 
@@ -235,12 +525,8 @@ impl GpuRenderer {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
 
-            wgpu::CurrentSurfaceTexture::Timeout => {
-                // The app event loop requests another frame after this call.
-                return;
-            }
-
-            wgpu::CurrentSurfaceTexture::Occluded => {
+            wgpu::CurrentSurfaceTexture::Timeout
+            | wgpu::CurrentSurfaceTexture::Occluded => {
                 return;
             }
 
@@ -260,12 +546,10 @@ impl GpuRenderer {
                 ) {
                     Ok(surface) => {
                         self.surface = surface;
-
                         self.surface.configure(
                             &self.device,
                             &self.surface_config,
                         );
-
                         self.window.request_redraw();
                     }
 
@@ -291,26 +575,24 @@ impl GpuRenderer {
 
         let mut encoder = self.device.create_command_encoder(
             &wgpu::CommandEncoderDescriptor {
-                label: Some("RUSTBLEND Command Encoder"),
+                label: Some("RUSTBLEND Viewport Command Encoder"),
             }
         );
 
         {
-            let mut render_pass = encoder.begin_render_pass(
+            let mut pass = encoder.begin_render_pass(
                 &wgpu::RenderPassDescriptor {
-                    label: Some("RUSTBLEND Main Render Pass"),
-
+                    label: Some("RUSTBLEND 3D Viewport"),
                     color_attachments: &[
                         Some(wgpu::RenderPassColorAttachment {
                             view: &view,
                             depth_slice: None,
                             resolve_target: None,
-
                             ops: wgpu::Operations {
                                 load: wgpu::LoadOp::Clear(
                                     wgpu::Color {
-                                        r: 0.025,
-                                        g: 0.035,
+                                        r: 0.035,
+                                        g: 0.045,
                                         b: 0.065,
                                         a: 1.0,
                                     }
@@ -319,24 +601,292 @@ impl GpuRenderer {
                             },
                         })
                     ],
-
-                    depth_stencil_attachment: None,
+                    depth_stencil_attachment: Some(
+                        wgpu::RenderPassDepthStencilAttachment {
+                            view: &self.depth_view,
+                            depth_ops: Some(wgpu::Operations {
+                                load: wgpu::LoadOp::Clear(1.0),
+                                store: wgpu::StoreOp::Store,
+                            }),
+                            stencil_ops: None,
+                        }
+                    ),
                     timestamp_writes: None,
                     occlusion_query_set: None,
                     multiview_mask: None,
                 }
             );
 
-            render_pass.set_pipeline(&self.pipeline);
-            render_pass.draw(0..3, 0..1);
+            pass.set_bind_group(0, &self.camera_bind_group, &[]);
+
+            pass.set_pipeline(&self.line_pipeline);
+            pass.set_vertex_buffer(0, self.line_vertex_buffer.slice(..));
+            pass.draw(0..self.line_vertex_count, 0..1);
+
+            pass.set_pipeline(&self.mesh_pipeline);
+            pass.set_vertex_buffer(0, self.mesh_vertex_buffer.slice(..));
+            pass.set_index_buffer(
+                self.mesh_index_buffer.slice(..),
+                wgpu::IndexFormat::Uint32,
+            );
+            pass.draw_indexed(0..self.mesh_index_count, 0, 0..1);
         }
 
         self.queue.submit([encoder.finish()]);
+        self.window.pre_present_notify();
         self.queue.present(frame);
 
         if !self.first_frame_presented {
-            eprintln!("RUSTBLEND GPU: first rendered frame presented.");
+            eprintln!("RUSTBLEND GPU: first 3D viewport frame presented.");
             self.first_frame_presented = true;
         }
     }
 }
+
+fn build_mesh_buffers(
+    packet: &RenderPacket,
+) -> Result<(Vec<f32>, Vec<u32>), String> {
+    let mut vertices = Vec::new();
+    let mut indices = Vec::new();
+
+    for object in packet.objects() {
+        let base = u32::try_from(vertices.len() / 9)
+            .map_err(|_| "Mesh vertex count exceeds u32.".to_string())?;
+
+        let model = object.model_matrix();
+
+        for vertex in object.vertices() {
+            let local_position = Vec3::new(
+                vertex.position[0],
+                vertex.position[1],
+                vertex.position[2],
+            );
+
+            let world_position = model
+                .transform_point(local_position)
+                .ok_or_else(|| "Mesh contains an invalid transformed vertex.".to_string())?;
+
+            let local_normal = Vec3::new(
+                vertex.normal[0],
+                vertex.normal[1],
+                vertex.normal[2],
+            );
+
+            let world_normal = model
+                .transform_direction(local_normal)
+                .normalized()
+                .unwrap_or(Vec3::new(0.0, 1.0, 0.0));
+
+            push_vertex(
+                &mut vertices,
+                world_position,
+                world_normal,
+                [0.68, 0.73, 0.82],
+            );
+        }
+
+        for &index in object.indices() {
+            indices.push(
+                base.checked_add(index)
+                    .ok_or_else(|| "Mesh index overflow.".to_string())?
+            );
+        }
+    }
+
+    if vertices.is_empty() || indices.is_empty() {
+        return Err("The initial scene does not contain drawable mesh geometry.".to_string());
+    }
+
+    Ok((vertices, indices))
+}
+
+fn build_grid_and_edges(scene: &Scene) -> Result<(Vec<f32>, u32), String> {
+    let mut vertices = Vec::new();
+    let extent = 12.0_f32;
+
+    for step in -12..=12 {
+        if step == 0 {
+            continue;
+        }
+
+        let value = step as f32;
+        let color = if step % 5 == 0 {
+            [0.25, 0.30, 0.37]
+        } else {
+            [0.13, 0.16, 0.21]
+        };
+
+        push_line(
+            &mut vertices,
+            Vec3::new(-extent, 0.0, value),
+            Vec3::new(extent, 0.0, value),
+            color,
+        );
+
+        push_line(
+            &mut vertices,
+            Vec3::new(value, 0.0, -extent),
+            Vec3::new(value, 0.0, extent),
+            color,
+        );
+    }
+
+    // World axes: X red, Y green, Z blue.
+    push_line(
+        &mut vertices,
+        Vec3::new(-extent, 0.012, 0.0),
+        Vec3::new(extent, 0.012, 0.0),
+        [0.92, 0.25, 0.22],
+    );
+
+    push_line(
+        &mut vertices,
+        Vec3::new(0.0, 0.012, -extent),
+        Vec3::new(0.0, 0.012, extent),
+        [0.24, 0.52, 0.96],
+    );
+
+    push_line(
+        &mut vertices,
+        Vec3::new(0.0, 0.012, 0.0),
+        Vec3::new(0.0, 3.2, 0.0),
+        [0.24, 0.78, 0.42],
+    );
+
+    let grid_vertex_count = u32::try_from(vertices.len() / 9)
+        .map_err(|_| "Grid vertex count exceeds u32.".to_string())?;
+
+    for object in scene.objects() {
+        let model = object.model_matrix();
+        let edge_color = if scene.is_selected(object.id()) {
+            [1.0, 0.48, 0.12]
+        } else {
+            [0.48, 0.55, 0.66]
+        };
+
+        for edge in object.mesh().edges() {
+            let [a, b] = edge.vertices();
+            let start = model
+                .transform_point(object.mesh().vertices()[a])
+                .ok_or_else(|| "Invalid first mesh edge vertex.".to_string())?;
+            let end = model
+                .transform_point(object.mesh().vertices()[b])
+                .ok_or_else(|| "Invalid second mesh edge vertex.".to_string())?;
+
+            push_line(
+                &mut vertices,
+                start,
+                end,
+                edge_color,
+            );
+        }
+    }
+
+    Ok((vertices, grid_vertex_count))
+}
+
+fn push_line(
+    output: &mut Vec<f32>,
+    start: Vec3,
+    end: Vec3,
+    color: [f32; 3],
+) {
+    let line_normal = Vec3::new(0.0, 1.0, 0.0);
+    push_vertex(output, start, line_normal, color);
+    push_vertex(output, end, line_normal, color);
+}
+
+fn push_vertex(
+    output: &mut Vec<f32>,
+    position: Vec3,
+    normal: Vec3,
+    color: [f32; 3],
+) {
+    output.extend_from_slice(&[
+        position.x,
+        position.y,
+        position.z,
+        normal.x,
+        normal.y,
+        normal.z,
+        color[0],
+        color[1],
+        color[2],
+    ]);
+}
+
+fn f32_bytes(values: &[f32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(values.len() * 4);
+
+    for value in values {
+        bytes.extend_from_slice(&value.to_ne_bytes());
+    }
+
+    bytes
+}
+
+fn u32_bytes(values: &[u32]) -> Vec<u8> {
+    let mut bytes = Vec::with_capacity(values.len() * 4);
+
+    for value in values {
+        bytes.extend_from_slice(&value.to_ne_bytes());
+    }
+
+    bytes
+}
+
+fn buffer_from_bytes(
+    device: &wgpu::Device,
+    label: &str,
+    bytes: &[u8],
+    usage: wgpu::BufferUsages,
+) -> wgpu::Buffer {
+    assert!(!bytes.is_empty(), "GPU buffers must not be empty.");
+
+    let buffer = device.create_buffer(
+        &wgpu::BufferDescriptor {
+            label: Some(label),
+            size: bytes.len() as u64,
+            usage,
+            mapped_at_creation: true,
+        }
+    );
+
+    {
+        let mut mapped = buffer.slice(..).get_mapped_range_mut();
+        mapped.copy_from_slice(bytes);
+    }
+
+    buffer.unmap();
+    buffer
+}
+
+fn create_depth_resources(
+    device: &wgpu::Device,
+    width: u32,
+    height: u32,
+) -> (wgpu::Texture, wgpu::TextureView) {
+    let texture = device.create_texture(
+        &wgpu::TextureDescriptor {
+            label: Some("RUSTBLEND Viewport Depth Buffer"),
+            size: wgpu::Extent3d {
+                width: width.max(1),
+                height: height.max(1),
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: DEPTH_FORMAT,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        }
+    );
+
+    let view = texture.create_view(
+        &wgpu::TextureViewDescriptor::default()
+    );
+
+    (texture, view)
+}
+
