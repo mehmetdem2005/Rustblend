@@ -1,0 +1,27 @@
+[package]
+name = "rustblend"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+name = "main"
+crate-type = ["cdylib"]
+
+[target.'cfg(target_os = "android")'.dependencies]
+winit = { version = "=0.30.13", default-features = false, features = ["android-native-activity", "rwh_06"] }
+wgpu = { version = "=30.0.1", default-features = false, features = ["std", "parking_lot", "vulkan", "gles", "wgsl"] }
+pollster = "=0.4.0"
+
+[package.metadata.android]
+package = "com.rustblend.mobile"
+build_targets = ["aarch64-linux-android"]
+label = "RUSTBLEND"
+
+[package.metadata.android.sdk]
+min_sdk_version = 23
+target_sdk_version = 30
+
+[package.metadata.android.application.activity]
+orientation = "unspecified"
+exported = true
+config_changes = "orientation|keyboardHidden|screenSize"

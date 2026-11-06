@@ -1,0 +1,37 @@
+# Rust build outputs
+/target/
+
+# Generated APKs and build artifacts
+/build/
+/*.apk
+*.aab
+
+# Android SDK / NDK
+/Android/
+/android-sdk/
+/android-ndk/
+
+# Secrets and signing keys
+.env
+.env.*
+!.env.example
+*.keystore
+*.jks
+*.p12
+*.pfx
+*.pem
+*.key
+secrets/
+credentials/
+
+# Local IDE / editor files
+.idea/
+.vscode/
+*.swp
+*.swo
+.DS_Store
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
