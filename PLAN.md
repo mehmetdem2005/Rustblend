@@ -144,7 +144,8 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [x] GitHub Actions run #22: APK v1/v2/v3 imzaları, ZIP/ELF 16 KB hizalaması ve `com.rustblend.mobile` 0.4.0 paket bilgileri doğrulandı.
 - [x] Artifact `13537772781` indirildi, ZIP arşivinden `RUSTBLEND.apk` çıkarıldı ve APK dosyasının varlığı doğrulandı. SHA-256: `723d48caef499b2f7d45b6a57e8f5d5bdd9d0d07a9b748c1fc6b0848d5a60191`.
 - [ ] Buffer yeniden üretimini yüksek nesne sayılarında kapasite tabanlı güncelleme ile optimize et.
-- [ ] Redmi Note 8 Pro'da 0.4.0 workspace görüntüsünü, dokunmatiği ve performansı doğrula.
+- [ ] 0.4.0 APK'sı açılışta çöküyor (kullanıcı bildirimi, 6 Kasım 2026); cihaz doğrulaması başarısız olarak kaydedildi.
+- [ ] 0.4.1 açılış hata yakalama adayı: wgpu uncaptured error logger, UI pipeline validation scope ve panic fallback eklendi; gerçek cihazda tekrar doğrula.
 
 **0.4.0 geliştirme notu:** Edit Preview topolojiyi gösterir; gerçek vertex/edge/face deformasyonu veya undo/redo henüz yoktur.
 
@@ -218,9 +219,13 @@ RUSTBLEND üzerinde çalışmaya başlamadan önce `README.md` ve bu `PLAN.md` d
 - [x] Aşama 0: GitHub runner Android ARM64 release library üretti.
 - [x] Aşama 0: 0.2.0 APK üretildi; imza, metadata ve hizalama doğrulamaları geçti.
 - [x] Aşama 0: 0.2.0 düzeltme APK'sında test üçgeni kullanıcının ekran görüntüsüyle doğrulandı; ilk 0.2.0 APK siyah ekran verdiği için başarısız deneme olarak kaydedildi.
-- [ ] Aşama 1: 0.4.0 modelleme çalışma alanını Redmi Note 8 Pro'da doğrula: viewport, Outliner, nesne işlemleri ve dokunmatik araçlar.
+- [ ] Aşama 1: 0.4.1 güvenli açılış adayını Redmi Note 8 Pro'da doğrula; 0.4.0 anında çökme verdi.
+
 - [ ] 0.4.0: Android ARM64 build ve cihaz testi sonucunu kaydet.
 
 Termux artık geliştirme sürecinin parçası değildir. Kod değişiklikleri doğrudan `main` üzerinde GitHub üzerinden yapılır; test ve APK derlemesi GitHub Actions'ta çalışır; başarılı APK artifact olarak teslim edilir.
 
 Bu liste yalnızca gerçek çıktılar görüldüğünde güncellenir.
+
+
+**Cihaz hata kaydı:** 0.4.0 kullanıcı tarafından açılışta çöküyor olarak raporlandı. 0.4.1 yalnızca hata yakalama/geri dönüş düzeltmesi adayıdır; cihazda başarılı açıldığı doğrulanmadı.

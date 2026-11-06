@@ -145,7 +145,7 @@ pub struct GpuRenderer {
 
     mesh_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
-    ui_pipeline: wgpu::RenderPipeline,
+    ui_pipeline: Option<wgpu::RenderPipeline>,
 
     camera: Camera,
     camera_buffer: wgpu::Buffer,
@@ -226,6 +226,12 @@ impl GpuRenderer {
             .map_err(|error| {
                 format!("GPU device creation failed: {error}")
             })?;
+
+        device.on_uncaptured_error(Arc::new(|error| {
+            eprintln!("RUSTBLEND GPU UNCAPTURED ERROR: {error}");
+        }));
+
+        eprintln!("RUSTBLEND GPU: device ready; uncaptured GPU errors will be logged.");
 
         let size = window.inner_size();
         let width = size.width.max(1);
@@ -413,6 +419,10 @@ impl GpuRenderer {
             }
         );
 
+        eprintln!("RUSTBLEND GPU: compiling workspace UI shader.");
+        let ui_validation_scope =
+            device.push_error_scope(wgpu::ErrorFilter::Validation);
+
         let ui_shader = device.create_shader_module(
             wgpu::ShaderModuleDescriptor {
                 label: Some("RUSTBLEND Workspace UI Shader"),
@@ -430,7 +440,7 @@ impl GpuRenderer {
             }
         ];
 
-        let ui_pipeline = device.create_render_pipeline(
+        let ui_pipeline_candidate = device.create_render_pipeline(
             &wgpu::RenderPipelineDescriptor {
                 label: Some("RUSTBLEND Workspace UI Pipeline"),
                 layout: None,
@@ -453,6 +463,17 @@ impl GpuRenderer {
                 cache: None,
             }
         );
+
+        let ui_pipeline = match ui_validation_scope.pop().await {
+            Some(error) => {
+                eprintln!("RUSTBLEND GPU: workspace UI pipeline disabled: {error}");
+                None
+            }
+            None => {
+                eprintln!("RUSTBLEND GPU: workspace UI pipeline ready.");
+                Some(ui_pipeline_candidate)
+            }
+        };
 
         let tool_mode = ToolMode::Orbit;
         let edit_mode = false;
@@ -519,6 +540,11 @@ impl GpuRenderer {
 
         let (depth_texture, depth_view) =
             create_depth_resources(&device, width, height);
+
+        eprintln!(
+            "RUSTBLEND GPU: startup resources ready; ui_enabled={}.",
+            ui_pipeline.is_some()
+        );
 
         eprintln!(
             "RUSTBLEND GPU: 3D viewport ready. objects={}, triangles={}, grid_vertices={}.",
@@ -1014,7 +1040,7 @@ impl GpuRenderer {
             pass.draw_indexed(0..self.mesh_index_count, 0, 0..1);
         }
 
-        {
+        if let Some(ui_pipeline) = self.ui_pipeline.as_ref() {
             let mut ui_pass = encoder.begin_render_pass(
                 &wgpu::RenderPassDescriptor {
                     label: Some("RUSTBLEND Workspace UI Overlay"),
@@ -1036,7 +1062,7 @@ impl GpuRenderer {
                 }
             );
 
-            ui_pass.set_pipeline(&self.ui_pipeline);
+            ui_pass.set_pipeline(ui_pipeline);
             ui_pass.set_vertex_buffer(0, self.ui_vertex_buffer.slice(..));
             ui_pass.draw(0..self.ui_vertex_count, 0..1);
         }

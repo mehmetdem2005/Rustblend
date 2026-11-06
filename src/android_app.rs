@@ -177,9 +177,28 @@ impl ApplicationHandler for RustBlendApp {
 
         eprintln!("RUSTBLEND: Initializing modeling workspace.");
 
-        let renderer = pollster::block_on(
-            GpuRenderer::new(display, window.clone())
+        eprintln!("RUSTBLEND: GPU renderer construction started.");
+
+        let renderer_attempt = std::panic::catch_unwind(
+            std::panic::AssertUnwindSafe(|| {
+                pollster::block_on(
+                    GpuRenderer::new(display, window.clone())
+                )
+            })
         );
+
+        let renderer = match renderer_attempt {
+            Ok(result) => result,
+            Err(payload) => {
+                let message = payload.downcast_ref::<&str>()
+                    .map(|value| (*value).to_owned())
+                    .or_else(|| payload.downcast_ref::<String>().cloned())
+                    .unwrap_or_else(|| "Unknown Rust panic during GPU initialization.".to_string());
+
+                eprintln!("RUSTBLEND: caught initialization panic: {message}");
+                Err(format!("GPU initialization panic: {message}"))
+            }
+        };
 
         match renderer {
             Ok(renderer) => {
@@ -205,7 +224,7 @@ impl ApplicationHandler for RustBlendApp {
             Err(error) => {
                 eprintln!("RUSTBLEND: Modeling workspace initialization failed: {error}");
 
-                window.set_title("RUSTBLEND - WORKSPACE ERROR");
+                window.set_title("RUSTBLEND - SAFE VIEWPORT MODE");
 
                 self.window = Some(window);
                 self.renderer = None;

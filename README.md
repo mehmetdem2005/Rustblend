@@ -108,7 +108,11 @@ The old Termux-only `build_apk.sh` is deprecated and is not used
 by the GitHub Actions build. The active cloud build script is
 `scripts/build-android-apk.sh`.
 
-## Current workspace milestone (0.4.0)
+## Current workspace milestone (0.4.x)
+
+The 0.4.0 device build was reported to close immediately on launch. Version 0.4.1 adds wgpu error logging, validation-scoped UI pipeline creation with a 3D-only fallback, and a Rust initialization-panic fallback. The device result is not yet verified.
+
+
 
 The Android viewport now includes a touch-first modeling workspace:
 
