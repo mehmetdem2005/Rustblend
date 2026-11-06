@@ -1,0 +1,65 @@
+name: RUSTBLEND Android Build
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: rustblend-android-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  android:
+    name: Test and build Android APK
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+
+    steps:
+      - name: Check out main
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install Android SDK and NDK
+        run: |
+          yes | sdkmanager --licenses >/dev/null
+          sdkmanager --install \
+            "platforms;android-35" \
+            "build-tools;35.0.0" \
+            "ndk;29.0.14206865"
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-linux-android
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          key: android-arm64
+
+      - name: Run Rust unit tests
+        run: cargo test --locked
+
+      - name: Build and package APK
+        run: bash scripts/build-android-apk.sh
+
+      - name: Upload installable APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: RUSTBLEND-Android-APK-${{ github.run_number }}
+          path: build/android-apk/RUSTBLEND.apk
+          if-no-files-found: error
+          retention-days: 14
