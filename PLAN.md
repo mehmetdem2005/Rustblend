@@ -64,6 +64,7 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [ ] Uzak depo adresini doğrula: `https://github.com/mehmetdem2005/Rustblend.git`.
 - [ ] Yalnızca `main` dalının bulunduğunu kontrol et; yeni dal oluşturma.
 - [ ] Yerel çalışma ağacının temiz olduğunu ve beklenmeyen dosya değişiklikleri bulunmadığını doğrula.
+- [x] Geliştirme ve APK derleme akışını Termux bağımlılığından çıkarıp GitHub Actions'a taşıyacak CI dosyalarını ekle.
 - [ ] `.gitignore` kurallarının keystore, yerel ortam dosyası, SDK/NDK ve build çıktısını dışarıda tuttuğunu kontrol et.
 - [ ] Yerel `.bak` dosyalarını yalnızca karşılaştırma amacıyla incele; gerekli bir kod veya karar varsa kontrollü biçimde değerlendir.
 
@@ -77,7 +78,8 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 
 ### 0.3. APK üretim hattını düzeltme
 
-- [ ] `AndroidManifest.xml` ile `build_apk.sh` içindeki versionCode ve versionName değerlerini tutarlı hale getir.
+- [x] Yeni GitHub Actions APK betiği sürüm numarasını doğrudan `AndroidManifest.xml` dosyasından okur.
+- [ ] Eski yerel `build_apk.sh` betiğindeki sabit versionCode/versionName değerlerini de tutarlı hale getir veya betiği açıkça emekliye ayır.
 - [ ] Sürüm bilgisinin iki ayrı yerde elle ve farklı değerlerle kalmasını önleyecek bir yöntem belirle.
 - [ ] APK paketinde `com.rustblend.mobile`, ARM64 `libmain.so` ve Android giriş sembollerinin bulunduğunu doğrula.
 - [ ] APK imzasını `apksigner verify` ile, 16 KB hizalamasını `zipalign -c -P 16` ile kontrol et.
@@ -85,7 +87,15 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [ ] Mevcut debug keystore'u koru. Aynı anahtarla imzalanan APK'yı eski sürümün üzerine kur; test için uygulamayı gereksiz yere kaldırma.
 - [ ] Keystore veya parolasını hiçbir koşulda Git'e ekleme.
 
-### 0.4. Gerçek cihaz doğrulaması
+### 0.4. GitHub Actions ve APK teslimi
+
+- [x] `.github/workflows/android-build.yml` dosyası eklendi; `main` üzerine push ve manuel workflow_dispatch ile çalışır.
+- [x] `scripts/build-android-apk.sh` Linux GitHub runner üzerinde Android ARM64 derleme ve APK paketleme için eklendi.
+- [ ] İlk GitHub Actions çalışmasının test, cross-compile, APK imza ve hizalama adımlarını geçtiğini doğrula.
+- [ ] APK artifact'ini indirip teslim et; artifact saklama süresi 14 gündür.
+- [ ] İlk bulut APK'sı geçici CI anahtarıyla imzalanır. Yerel debug imzalı eski APK üzerine güncelleme yapılamaz; ilk test kurulumunda eski APK kaldırılmalıdır.
+
+### 0.5. Gerçek cihaz doğrulaması
 
 - [ ] APK'yı Redmi Note 8 Pro / Android 11 üzerine kur veya aynı imza anahtarıyla güncelle.
 - [ ] Uygulamanın çökmeden açıldığını doğrula.
@@ -175,9 +185,12 @@ RUSTBLEND üzerinde çalışmaya başlamadan önce `README.md` ve bu `PLAN.md` d
 - [x] İlk kaynak aktarımı `main` dalına yapıldı.
 - [x] Tek dal kuralı `README.md` içine yazıldı.
 - [x] Kaynak kodu, `Cargo.toml`, `Cargo.lock`, manifest ve APK betiği depoya aktarıldı.
-- [ ] Aşama 0: güncel kaynakta testleri tekrar çalıştır.
+- [x] GitHub Actions tabanlı bulut test/derleme iş akışını ekle.
+- [ ] Aşama 0: GitHub Actions üzerinde güncel kaynak testlerini çalıştır.
 - [ ] Aşama 0: APK sürüm metadata tutarsızlığını gider.
 - [ ] Aşama 0: güncel APK'yı üret ve doğrula.
 - [ ] Aşama 0: gerçek cihazda GPU görüntüsünü ve yaşam döngüsünü doğrula.
+
+Geliştirici cihazında Termux kullanımı artık zorunlu değildir. Kod ve CI değişiklikleri GitHub üzerinden yönetilir; APK GitHub Actions artifact'i olarak teslim edilir.
 
 Bu liste yalnızca gerçek çıktılar görüldüğünde güncellenir.
