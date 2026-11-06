@@ -4,7 +4,7 @@ use std::sync::Arc;
 use crate::{
     camera::Camera,
     geometry::Mesh,
-    math::{Mat4, Quaternion, Vec3},
+    math::{Quaternion, Vec3},
     render::RenderPacket,
     scene::{Scene, Transform},
 };
@@ -256,8 +256,8 @@ impl GpuRenderer {
         let pipeline_layout = device.create_pipeline_layout(
             &wgpu::PipelineLayoutDescriptor {
                 label: Some("RUSTBLEND Viewport Pipeline Layout"),
-                bind_group_layouts: &[&camera_bind_group_layout],
-                push_constant_ranges: &[],
+                bind_group_layouts: &[Some(&camera_bind_group_layout)],
+                immediate_size: 0,
             }
         );
 
@@ -311,7 +311,7 @@ impl GpuRenderer {
                     module: &mesh_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &mesh_layout,
+                    buffers: &[Some(mesh_layout[0].clone())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &mesh_shader,
@@ -326,8 +326,8 @@ impl GpuRenderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
-                    depth_write_enabled: true,
-                    depth_compare: wgpu::CompareFunction::LessEqual,
+                    depth_write_enabled: Some(true),
+                    depth_compare: Some(wgpu::CompareFunction::LessEqual),
                     stencil: Default::default(),
                     bias: Default::default(),
                 }),
@@ -345,7 +345,7 @@ impl GpuRenderer {
                     module: &line_shader,
                     entry_point: Some("vs_main"),
                     compilation_options: Default::default(),
-                    buffers: &line_layout,
+                    buffers: &[Some(line_layout[0].clone())],
                 },
                 fragment: Some(wgpu::FragmentState {
                     module: &line_shader,
@@ -360,7 +360,7 @@ impl GpuRenderer {
                 },
                 depth_stencil: Some(wgpu::DepthStencilState {
                     format: DEPTH_FORMAT,
-                    depth_write_enabled: false,
+                    depth_write_enabled: Some(false),
                     depth_compare: wgpu::CompareFunction::LessEqual,
                     stencil: Default::default(),
                     bias: wgpu::DepthBiasState {
@@ -853,7 +853,7 @@ fn buffer_from_bytes(
     );
 
     {
-        let mut mapped = buffer.slice(..).get_mapped_range_mut();
+        let mut mapped = buffer.slice(..).get_mapped_range_mut().expect("Fresh GPU buffer must map successfully.");
         mapped.copy_from_slice(bytes);
     }
 
