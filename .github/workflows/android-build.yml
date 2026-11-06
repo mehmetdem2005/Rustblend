@@ -109,7 +109,7 @@ jobs:
               ...context.repo,
               path,
               message: `ci: record successful Android build ${context.runNumber}`,
-              content: Buffer.from(JSON.stringify(body, null, 2) + "\\n").toString("base64"),
+              content: Buffer.from(JSON.stringify(body, null, 2) + "\n").toString("base64"),
               branch: "main",
               ...(sha ? { sha } : {})
             });
