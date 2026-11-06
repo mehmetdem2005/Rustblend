@@ -72,9 +72,9 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 
 ### 0.2. Test ve derleme taban çizgisi
 
-- [ ] Güncel kaynak üzerinde GitHub Actions ile `cargo test --locked` çalıştır; GPU eklendikten sonraki ilk gerçek test sonucunu kaydet.
+- [x] GitHub Actions run #10 üzerinde `cargo test --locked`: **81 test geçti, 0 başarısız** (6 Kasım 2026).
 - [ ] Hataları sınıflandır ve düzelt; testleri atlama veya başarısız testi başarılı gibi işaretleme.
-- [ ] GitHub Actions ile `cargo build --locked --release --target aarch64-linux-android` Android hedef derlemesini doğrula.
+- [x] GitHub Actions run #10 üzerinde Android ARM64 release cross-compile başarılı.
 - [ ] Kullanılan Rust, wgpu, winit, SDK ve NDK sürümlerini gerektiğinde kaydet.
 - [ ] Gereksiz bağımlılık ekleme; eklenen her bağımlılığın gerekçesini belgele.
 
@@ -83,10 +83,12 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [x] Yeni GitHub Actions APK betiği sürüm numarasını doğrudan `AndroidManifest.xml` dosyasından okur.
 - [x] Eski Termux-only `build_apk.sh` betiği emekliye ayrıldı; aktif APK akışında kullanılmıyor.
 - [x] Sürüm bilgisi aktif cloud build betiğinde doğrudan `AndroidManifest.xml` dosyasından okunur.
-- [ ] APK paketinde `com.rustblend.mobile`, ARM64 `libmain.so` ve Android giriş sembollerinin bulunduğunu CI çıktısıyla doğrula.
-- [ ] APK imzasını `apksigner verify` ile, ZIP ve ELF 16 KB hizalamasını doğrula.
-- [ ] APK içindeki gerçek versionCode/versionName ve minSdk/targetSdk değerlerini paket metadata'sından doğrula.
-- [ ] Mevcut debug keystore'u koru. Aynı anahtarla imzalanan APK'yı eski sürümün üzerine kur; test için uygulamayı gereksiz yere kaldırma.
+- [x] APK paketinde `com.rustblend.mobile`, ARM64 `libmain.so`, `ANativeActivity_onCreate` ve `android_main` doğrulandı.
+- [x] `apksigner verify` başarılı; v1, v2 ve v3 imza şemaları doğrulandı.
+- [x] ZIP hizalaması ve ELF LOAD segmentlerinin tamamında 16 KB hizalama doğrulandı.
+- [x] Paket metadata'sı doğrulandı: versionCode 2, versionName 0.2.0, minSdk 23, targetSdk 30.
+- [x] CI geçici imza anahtarını runner üzerinde üretir; özel anahtar depoya eklenmez.
+- [ ] İlk CI imzalı APK'yı eski yerel debug imzalı sürüm üzerine güncelleme; imza farklı olduğundan temiz kurulum gerekir. Kalıcı imza için eski keystore dosyası güvenli şekilde GitHub Actions secret'larına taşınmalıdır.
 - [ ] Keystore veya parolasını hiçbir koşulda Git'e ekleme.
 
 ### 0.4. GitHub Actions ve APK teslimi
@@ -94,9 +96,9 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [x] `.github/workflows/android-build.yml` dosyası eklendi; `main` üzerine push ve manuel workflow_dispatch ile çalışır.
 - [x] `scripts/build-android-apk.sh` Linux GitHub runner üzerinde Android ARM64 derleme, NativeActivity sembolü, ELF 16 KB segment hizalaması, APK metadata, imza ve ZIP hizalama kontrolleri için eklendi.
 - [x] CI sonucu `CI_BUILD_STATUS.json` içine kaydedilecek; başarılı sonuç artifact kimliğini, başarısız sonuç GitHub Actions run bağlantısını içerir.
-- [ ] İlk GitHub Actions çalışmasının test, cross-compile, APK imza ve hizalama adımlarını geçtiğini doğrula.
-- [ ] APK artifact'ini indirip teslim et; artifact saklama süresi 14 gündür.
-- [ ] İlk bulut APK'sı geçici CI anahtarıyla imzalanır. Yerel debug imzalı eski APK üzerine güncelleme yapılamaz; ilk test kurulumunda eski APK kaldırılmalıdır.
+- [x] GitHub Actions run #10 tüm adımları geçti: test, Android ARM64 cross-compile, APK imza ve hizalama.
+- [x] APK artifact indirildi ve arşivden çıkarılarak yerel dosya bütünlüğü kontrol edildi; artifact ID `13532651312`, saklama süresi 14 gün.
+- [x] Teslim edilen dosya: `RUSTBLEND-0.2.0-arm64.apk` (8,5 MB). SHA-256: `2fcea8d738f5141e7f320ffa3340d86591c069da4ef1c45e3fed522e55ba4586`.
 
 ### 0.5. Gerçek cihaz doğrulaması
 
@@ -189,10 +191,10 @@ RUSTBLEND üzerinde çalışmaya başlamadan önce `README.md` ve bu `PLAN.md` d
 - [x] Tek dal kuralı `README.md` içine yazıldı.
 - [x] Kaynak kodu, `Cargo.toml`, `Cargo.lock`, manifest ve APK betiği depoya aktarıldı.
 - [x] GitHub Actions tabanlı bulut test/derleme iş akışını ekle.
-- [ ] Aşama 0: GitHub Actions üzerinde güncel kaynak testlerini çalıştır.
-- [ ] Aşama 0: APK sürüm metadata tutarsızlığını gider.
-- [ ] Aşama 0: güncel APK'yı üret ve doğrula.
-- [ ] Aşama 0: gerçek cihazda GPU görüntüsünü ve yaşam döngüsünü doğrula.
+- [x] Aşama 0: GitHub Actions üzerinde 81/81 Rust testi geçti.
+- [x] Aşama 0: GitHub runner Android ARM64 release library üretti.
+- [x] Aşama 0: 0.2.0 APK üretildi; imza, metadata ve hizalama doğrulamaları geçti.
+- [ ] Aşama 0: APK'yı Redmi Note 8 Pro'ya kurup GPU test üçgenini ve yaşam döngüsünü doğrula.
 
 Termux artık geliştirme sürecinin parçası değildir. Kod değişiklikleri doğrudan `main` üzerinde GitHub üzerinden yapılır; test ve APK derlemesi GitHub Actions'ta çalışır; başarılı APK artifact olarak teslim edilir.
 
