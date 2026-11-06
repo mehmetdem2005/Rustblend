@@ -63,6 +63,7 @@ pub struct GpuRenderer {
     window: Arc<Window>,
 
     adapter_name: String,
+    first_frame_presented: bool,
 }
 
 impl GpuRenderer {
@@ -70,37 +71,50 @@ impl GpuRenderer {
         display: OwnedDisplayHandle,
         window: Arc<Window>,
     ) -> Result<Self, String> {
+        eprintln!("RUSTBLEND GPU: creating Vulkan + GLES instance.");
 
         let mut instance_desc =
             wgpu::InstanceDescriptor::new_with_display_handle(
                 Box::new(display)
             );
 
-        instance_desc.backends = wgpu::Backends::GL;
+        // Prefer the native Vulkan driver when available, while retaining
+        // OpenGL ES as a fallback for Android devices with limited Vulkan support.
+        instance_desc.backends =
+            wgpu::Backends::VULKAN | wgpu::Backends::GL;
 
         let instance = wgpu::Instance::new(instance_desc);
+
+        eprintln!("RUSTBLEND GPU: creating Android surface.");
 
         let surface = instance
             .create_surface(window.clone())
             .map_err(|e| {
-                format!("GPU yüzeyi oluşturulamadı: {e}")
+                format!("GPU surface creation failed: {e}")
             })?;
+
+        eprintln!("RUSTBLEND GPU: requesting compatible adapter.");
 
         let adapter = instance
             .request_adapter(&wgpu::RequestAdapterOptions {
                 power_preference: wgpu::PowerPreference::HighPerformance,
                 force_fallback_adapter: false,
                 compatible_surface: Some(&surface),
-
-                // wgpu 30 için gerekli alan.
                 apply_limit_buckets: false,
             })
             .await
             .map_err(|e| {
-                format!("GPU bulunamadı: {e}")
+                format!("No compatible GPU adapter found: {e}")
             })?;
 
-        let adapter_name = adapter.get_info().name;
+        let adapter_info = adapter.get_info();
+        let adapter_name = format!(
+            "{} ({:?})",
+            adapter_info.name,
+            adapter_info.backend
+        );
+
+        eprintln!("RUSTBLEND GPU: selected adapter {adapter_name}.");
 
         let (device, queue) = adapter
             .request_device(
@@ -108,8 +122,10 @@ impl GpuRenderer {
             )
             .await
             .map_err(|e| {
-                format!("GPU cihazı açılamadı: {e}")
+                format!("GPU device creation failed: {e}")
             })?;
+
+        eprintln!("RUSTBLEND GPU: device created.");
 
         let size = window.inner_size();
 
@@ -120,13 +136,20 @@ impl GpuRenderer {
                 size.height.max(1),
             )
             .ok_or_else(|| {
-                "GPU ekran yüzeyini desteklemiyor.".to_string()
+                "The selected GPU does not support the Android surface.".to_string()
             })?;
 
-        surface_config.present_mode =
-            wgpu::PresentMode::AutoVsync;
+        // FIFO is the portable Android presentation mode and is VSync paced.
+        surface_config.present_mode = wgpu::PresentMode::Fifo;
 
         surface.configure(&device, &surface_config);
+
+        eprintln!(
+            "RUSTBLEND GPU: surface configured at {}x{} ({:?}).",
+            surface_config.width,
+            surface_config.height,
+            surface_config.format
+        );
 
         let shader = device.create_shader_module(
             wgpu::ShaderModuleDescriptor {
@@ -172,6 +195,8 @@ impl GpuRenderer {
             }
         );
 
+        eprintln!("RUSTBLEND GPU: triangle pipeline created.");
+
         Ok(Self {
             instance,
             surface,
@@ -181,6 +206,7 @@ impl GpuRenderer {
             pipeline,
             window,
             adapter_name,
+            first_frame_presented: false,
         })
     }
 
@@ -209,8 +235,12 @@ impl GpuRenderer {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
 
-            wgpu::CurrentSurfaceTexture::Timeout
-            | wgpu::CurrentSurfaceTexture::Occluded => {
+            wgpu::CurrentSurfaceTexture::Timeout => {
+                // The app event loop requests another frame after this call.
+                return;
+            }
+
+            wgpu::CurrentSurfaceTexture::Occluded => {
                 return;
             }
 
@@ -241,7 +271,7 @@ impl GpuRenderer {
 
                     Err(error) => {
                         eprintln!(
-                            "GPU yüzeyi yenilenemedi: {error}"
+                            "RUSTBLEND GPU: surface recreation failed: {error}"
                         );
                     }
                 }
@@ -250,7 +280,7 @@ impl GpuRenderer {
             }
 
             wgpu::CurrentSurfaceTexture::Validation => {
-                eprintln!("GPU yüzey doğrulama hatası.");
+                eprintln!("RUSTBLEND GPU: surface validation failed.");
                 return;
             }
         };
@@ -302,10 +332,11 @@ impl GpuRenderer {
         }
 
         self.queue.submit([encoder.finish()]);
-
-        self.window.pre_present_notify();
-
-        // wgpu 30'da sunum işlemi Queue üzerinden yapılır.
         self.queue.present(frame);
+
+        if !self.first_frame_presented {
+            eprintln!("RUSTBLEND GPU: first rendered frame presented.");
+            self.first_frame_presented = true;
+        }
     }
 }
