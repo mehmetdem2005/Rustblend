@@ -15,7 +15,7 @@ experience to Android devices.
 - GLB / GLTF import and export.
 - Portrait and landscape support.
 - Independent APK installation.
-- Development environment: Termux on Android.
+- Development and Android APK builds: GitHub Actions (cloud); Termux is not required.
 
 ## Target device
 
@@ -65,11 +65,11 @@ Do not create another branch under any circumstances.
 
 1. Inspect the existing code.
 2. Understand the current architecture.
-3. Make controlled changes.
-4. Run `cargo test`.
-5. Run `cargo build --release`.
-6. Build and verify the Android APK.
-7. Commit changes directly to `main`.
+3. Make controlled changes directly on `main`.
+4. Let GitHub Actions run `cargo test --locked`.
+5. Let the GitHub runner cross-compile the Android ARM64 library.
+6. Build, sign, and verify the APK in GitHub Actions.
+7. Download the APK artifact from the successful workflow run.
 
 ### Security
 
@@ -104,8 +104,9 @@ local debug key; uninstall the old test app before installing the
 first cloud build. A persistent protected signing key can be configured
 later through GitHub Actions secrets.
 
-The legacy `build_apk.sh` is retained for reference and is not used
-by the GitHub Actions build.
+The old Termux-only `build_apk.sh` is deprecated and is not used
+by the GitHub Actions build. The active cloud build script is
+`scripts/build-android-apk.sh`.
 
 ## Development roadmap
 
