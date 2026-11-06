@@ -97,7 +97,7 @@ impl ApplicationHandler for RustBlendApp {
 
     fn window_event(
         &mut self,
-        _event_loop: &ActiveEventLoop,
+        event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
@@ -110,7 +110,9 @@ impl ApplicationHandler for RustBlendApp {
         }
 
         match event {
-            WindowEvent::CloseRequested => {}
+            WindowEvent::CloseRequested => {
+                event_loop.exit();
+            }
 
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = self.renderer.as_mut() {
