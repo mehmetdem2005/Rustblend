@@ -46,6 +46,9 @@ Bilinen mevcut gerçekler:
 - GPU öncesi sürümde 81 testin geçtiği kaydedilmiştir. Bu sonuç, GPU eklendikten sonraki güncel kaynak için otomatik olarak geçerli sayılmaz.
 - wgpu 30.0.1 ve winit 0.30.13 ile Android ARM64 release derlemesi başarılı olmuştur.
 - Mevcut `gpu.rs` gerçek sahne geometrisini henüz çizmiyor; WGSL shader ile test üçgeni çiziyor.
+- Kullanıcı, 0.2.0 APK'sını Redmi Note 8 Pro / Android 11 üzerinde açtığında yalnızca siyah ekran gördüğünü bildirdi. Bu nedenle önceki cihaz doğrulaması **başarısızdır**; test üçgeninin göründüğü kabul edilmez.
+- İncelemede, GPU başlatma hatasının yalnızca Android loguna yazıldığı ve uygulamanın renderer olmadan boş pencerede kaldığı görüldü. İlk kare alma denemesi de yalnızca bir kez isteniyordu.
+- 6 Kasım 2026 düzeltmesi: `gpu.rs` Vulkan + GLES backend'lerini etkinleştirir, FIFO sunum modunu kullanır ve GPU başlangıç adımlarını loglar. `android_app.rs` renderer çalışırken VSync kontrollü sürekli redraw döngüsü kullanır. Bu değişikliklerin derlenmesi cihazda görüntünün kesin düzeldiğini kanıtlamaz.
 - `render.rs` içindeki RenderPacket henüz GPU vertex/index buffer'larına bağlanmamıştır.
 - Kamera ve sahne sistemi henüz Android viewport çizim döngüsüne bağlanmamıştır.
 - Android uygulama kabuğunun ve GPU yüzeyinin gerçek cihazdaki çalışması ayrıca doğrulanmalıdır.
@@ -75,6 +78,7 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [x] GitHub Actions run #10 üzerinde `cargo test --locked`: **81 test geçti, 0 başarısız** (6 Kasım 2026).
 - [ ] Hataları sınıflandır ve düzelt; testleri atlama veya başarısız testi başarılı gibi işaretleme.
 - [x] GitHub Actions run #10 üzerinde Android ARM64 release cross-compile başarılı.
+- [x] GitHub Actions run #16 üzerinde güncel Vulkan + GLES renderer ve Android redraw döngüsü Android ARM64 için derlendi; 81/81 test geçti, APK üretildi.
 - [ ] Kullanılan Rust, wgpu, winit, SDK ve NDK sürümlerini gerektiğinde kaydet.
 - [ ] Gereksiz bağımlılık ekleme; eklenen her bağımlılığın gerekçesini belgele.
 
@@ -100,8 +104,11 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [x] GitHub Actions run #10 tüm adımları geçti: test, Android ARM64 cross-compile, APK imza ve hizalama.
 - [x] APK artifact indirildi ve arşivden çıkarılarak yerel dosya bütünlüğü kontrol edildi; artifact ID `13532651312`, saklama süresi 14 gün.
 - [x] Teslim edilen dosya: `RUSTBLEND-0.2.0-arm64.apk` (8,5 MB). SHA-256: `2fcea8d738f5141e7f320ffa3340d86591c069da4ef1c45e3fed522e55ba4586`.
+- [x] Düzeltilmiş kaynak kodundan üretilen yeni aday APK artifact'i: run #16, artifact ID `13535580631`; boyut 8,85 MB. CI imza, ZIP hizalama ve paket metadata kontrolleri başarılı.
 
 ### 0.5. Gerçek cihaz doğrulaması
+
+**Cihaz testi kaydı — 6 Kasım 2026:** Önceki 0.2.0 APK'sı siyah ekran verdi (kullanıcı bildirimi). Aşağıdaki kontroller yeni aday APK için yeniden yapılmalıdır; eski build'in CI başarısı bu kontrolün yerine geçmez.
 
 - [ ] APK'yı Redmi Note 8 Pro / Android 11 üzerine kur veya aynı imza anahtarıyla güncelle.
 - [ ] Uygulamanın çökmeden açıldığını doğrula.
@@ -195,7 +202,7 @@ RUSTBLEND üzerinde çalışmaya başlamadan önce `README.md` ve bu `PLAN.md` d
 - [x] Aşama 0: GitHub Actions üzerinde 81/81 Rust testi geçti.
 - [x] Aşama 0: GitHub runner Android ARM64 release library üretti.
 - [x] Aşama 0: 0.2.0 APK üretildi; imza, metadata ve hizalama doğrulamaları geçti.
-- [ ] Aşama 0: APK'yı Redmi Note 8 Pro'ya kurup GPU test üçgenini ve yaşam döngüsünü doğrula.
+- [ ] Aşama 0: Düzeltilmiş APK'yı Redmi Note 8 Pro'ya kurup GPU test üçgenini ve yaşam döngüsünü doğrula. Önceki 0.2.0 APK'sı siyah ekran verdi; bu madde tamamlanmış değildir.
 
 Termux artık geliştirme sürecinin parçası değildir. Kod değişiklikleri doğrudan `main` üzerinde GitHub üzerinden yapılır; test ve APK derlemesi GitHub Actions'ta çalışır; başarılı APK artifact olarak teslim edilir.
 
