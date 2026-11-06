@@ -45,14 +45,16 @@ Bilinen mevcut gerçekler:
 - CPU tarafında matematik, geometri, kamera, sahne, seçim ve RenderPacket altyapısı oluşturulmuştur.
 - GPU öncesi sürümde 81 testin geçtiği kaydedilmiştir. Bu sonuç, GPU eklendikten sonraki güncel kaynak için otomatik olarak geçerli sayılmaz.
 - wgpu 30.0.1 ve winit 0.30.13 ile Android ARM64 release derlemesi başarılı olmuştur.
-- Mevcut `gpu.rs` gerçek sahne geometrisini henüz çizmiyor; WGSL shader ile test üçgeni çiziyor.
+- Önceki 0.2.0 renderer'ı yalnızca `gpu.rs` içinde koordinatları elle yazılmış WGSL test üçgenini çiziyordu; kullanıcı bu üçgenin Redmi Note 8 Pro ekranında göründüğünü ekran görüntüsüyle doğruladı.
+- 0.3.0 renderer'ı `RenderPacket::from_scene` çıktısını GPU vertex/index buffer'larına aktarır; başlangıç sahnesinde gerçek `Mesh::cube(2.0)` geometrisi, model dönüşümü, kamera view-projection matrisi ve depth buffer kullanılır.
+- 0.3.0 viewport ayrıca XZ zemin grid'i, X/Y/Z dünya eksenleri ve seçili nesne için turuncu kenar çizgileri üretir. Bir parmakla orbit, iki parmakla pinch zoom dokunmatik girdisi eklendi.
 - Kullanıcı, 0.2.0 APK'sını Redmi Note 8 Pro / Android 11 üzerinde açtığında yalnızca siyah ekran gördüğünü bildirdi. Bu nedenle önceki cihaz doğrulaması **başarısızdır**; test üçgeninin göründüğü kabul edilmez.
 - İncelemede, GPU başlatma hatasının yalnızca Android loguna yazıldığı ve uygulamanın renderer olmadan boş pencerede kaldığı görüldü. İlk kare alma denemesi de yalnızca bir kez isteniyordu.
 - 6 Kasım 2026 düzeltmesi: `gpu.rs` Vulkan + GLES backend'lerini etkinleştirir, FIFO sunum modunu kullanır ve GPU başlangıç adımlarını loglar. `android_app.rs` renderer çalışırken VSync kontrollü sürekli redraw döngüsü kullanır. Bu değişikliklerin derlenmesi cihazda görüntünün kesin düzeldiğini kanıtlamaz.
 - `render.rs` içindeki RenderPacket henüz GPU vertex/index buffer'larına bağlanmamıştır.
 - Kamera ve sahne sistemi henüz Android viewport çizim döngüsüne bağlanmamıştır.
 - Android uygulama kabuğunun ve GPU yüzeyinin gerçek cihazdaki çalışması ayrıca doğrulanmalıdır.
-- Vulkan kabiliyeti gerçek Mali sürücüsünde doğrulanmadığından mevcut renderer GLES backend'ini seçmektedir.
+- Mevcut Android GPU instance'ı Vulkan ve GLES backend'lerini birlikte etkinleştirir; gerçek cihazda seçilen backend adapter logunda görünür. 0.3.0 ekran testi henüz beklenmektedir.
 - `AndroidManifest.xml` sürüm bilgisi 0.2.0 / versionCode 2 iken `build_apk.sh` içinde AAPT2 için 0.1.0 / versionCode 1 sabitlenmiştir. Bu tutarsızlık düzeltilmelidir.
 - Eski `build_apk.sh` Termux'a özel ve kullanımdan kaldırılmıştır; aktif geliştirme veya APK teslim akışında kullanılmaz.
 - Aktif `scripts/build-android-apk.sh` betiği GitHub runner'ın SDK/NDK ortamını kullanır, sürüm bilgisini `AndroidManifest.xml` dosyasından okur ve imza/hizalama/paket metadata kontrolleri yapar.
@@ -123,19 +125,21 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 
 ## 5. Aşama 1 — gerçek 3B viewport
 
-Aşama 0 tamamlandıktan sonra:
+0.3.0 için GitHub Actions run #20 üzerinde aşağıdaki ilk viewport parçaları Android ARM64'e derlenmiştir:
 
-- [ ] `RenderPacket` verisini GPU vertex ve index buffer'larına aktar.
-- [ ] Nesnelerin model matrislerini shader'a gönder.
-- [ ] Mevcut kamera view/projection matrislerini viewport çizimine bağla.
-- [ ] Derinlik tamponu ve doğru yüzey formatı/viewport ayarlarını ekle.
-- [ ] Önce tek bir test küpünü, sonra birden fazla mesh'i çiz.
-- [ ] Grid ve dünya eksenlerini ekle.
-- [ ] Kaynak mesh değiştiğinde GPU buffer'larının güncellenmesini sağla.
+- [x] `RenderPacket` verisini GPU vertex ve index buffer'larına aktar.
+- [x] Nesnelerin model matrislerini GPU'ya aktarılmadan önce mesh konumlarına uygula.
+- [x] Mevcut kamera view/projection matrislerini viewport çizimine bağla.
+- [x] Derinlik tamponu ve yüzey yeniden boyutlandırmasını ekle.
+- [x] Başlangıç sahnesinde gerçek `Mesh::cube(2.0)` geometrisini çiz.
+- [x] Zemin grid'i ve X/Y/Z dünya eksenlerini ekle.
+- [x] Seçili nesnenin kenar çizgilerini vurgula.
+- [x] Tek parmak orbit ve iki parmak pinch zoom kontrolünü ekle.
+- [ ] Sahne değiştiğinde GPU vertex/index buffer'larını kontrollü biçimde güncelle.
 - [ ] Bellek ve kaynak ömrünü yönet; her frame gereksiz buffer oluşturma.
-- [ ] Temel çizim doğruluğunu ve cihaz performansını ölç.
+- [ ] Redmi Note 8 Pro'da 0.3.0 viewport görüntüsünü, dokunmatiği ve performansı doğrula.
 
-**Kabul ölçütü:** CPU sahnesindeki nesneler doğru dönüşümle GPU'da görünmeli; kamera değişince görüntü güncellenmeli; uygulama yaşam döngüsü testleri çalışmaya devam etmelidir.
+**Kabul ölçütü:** CPU sahnesindeki nesneler doğru dönüşümle GPU'da görünmeli; kamera hareketi görüntüyü güncellemeli; uygulama yaşam döngüsü testleri çalışmaya devam etmelidir. Kaynak kodunun derlenmesi cihazdaki görüntünün doğrulandığı anlamına gelmez.
 
 ## 6. Aşama 2 — dokunmatik etkileşim ve seçim
 
@@ -202,7 +206,8 @@ RUSTBLEND üzerinde çalışmaya başlamadan önce `README.md` ve bu `PLAN.md` d
 - [x] Aşama 0: GitHub Actions üzerinde 81/81 Rust testi geçti.
 - [x] Aşama 0: GitHub runner Android ARM64 release library üretti.
 - [x] Aşama 0: 0.2.0 APK üretildi; imza, metadata ve hizalama doğrulamaları geçti.
-- [ ] Aşama 0: Düzeltilmiş APK'yı Redmi Note 8 Pro'ya kurup GPU test üçgenini ve yaşam döngüsünü doğrula. Önceki 0.2.0 APK'sı siyah ekran verdi; bu madde tamamlanmış değildir.
+- [x] Aşama 0: 0.2.0 düzeltme APK'sında test üçgeni kullanıcının ekran görüntüsüyle doğrulandı; ilk 0.2.0 APK siyah ekran verdiği için başarısız deneme olarak kaydedildi.
+- [ ] Aşama 1: 0.3.0 gerçek sahne viewport'unu Redmi Note 8 Pro'ya kurup küp, grid, eksenler ve dokunmatik orbit/zoom davranışını doğrula.
 
 Termux artık geliştirme sürecinin parçası değildir. Kod değişiklikleri doğrudan `main` üzerinde GitHub üzerinden yapılır; test ve APK derlemesi GitHub Actions'ta çalışır; başarılı APK artifact olarak teslim edilir.
 
