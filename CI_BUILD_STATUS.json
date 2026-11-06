@@ -1,0 +1,11 @@
+{
+  "status": "failure",
+  "run_id": 42273337521,
+  "run_number": 7,
+  "run_url": "https://github.com/mehmetdem2005/Rustblend/actions/runs/42273337521",
+  "source_commit": "81ce427577075c3dff3d4e8bfb5dfd26c3f55e49",
+  "artifact_id": null,
+  "artifact_name": null,
+  "apk_file": null,
+  "retention_days": null
+}
