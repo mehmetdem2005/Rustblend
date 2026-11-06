@@ -1,9 +1,9 @@
 {
   "status": "failure",
-  "run_id": 42283007372,
-  "run_number": 18,
-  "run_url": "https://github.com/mehmetdem2005/Rustblend/actions/runs/42283007372",
-  "source_commit": "2ee30a3fad69329b4fdc12888a4b13afdfc70865",
+  "run_id": 42283205944,
+  "run_number": 19,
+  "run_url": "https://github.com/mehmetdem2005/Rustblend/actions/runs/42283205944",
+  "source_commit": "36298cefe9c7f55807327787b0d932485ec8c097",
   "artifact_id": null,
   "artifact_name": null,
   "apk_file": null,
