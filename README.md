@@ -98,11 +98,11 @@ On every push to `main`, GitHub Actions:
 Open the repository's **Actions** tab, select the latest successful
 "RUSTBLEND Android Build" run, and download its APK artifact.
 
-The cloud build currently uses a temporary CI signing key. The first
-cloud-signed APK therefore cannot update an APK signed with the old
-local debug key; uninstall the old test app before installing the
-first cloud build. A persistent protected signing key can be configured
-later through GitHub Actions secrets.
+The current cloud workflow generates a fresh temporary signing key on
+each run. Therefore, each APK must be installed as a clean install after
+removing an older RUSTBLEND APK signed with a different key. To support
+in-place app updates, configure a persistent private keystore through
+GitHub Actions secrets; never commit that keystore to this public repo.
 
 The old Termux-only `build_apk.sh` is deprecated and is not used
 by the GitHub Actions build. The active cloud build script is
