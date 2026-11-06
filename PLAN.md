@@ -37,7 +37,8 @@ Mevcut mimarinin ana parçaları:
 | `src/render.rs` | Sahneyi GPU'ya aktarılabilecek RenderPacket verisine dönüştürme |
 | `src/gpu.rs` | wgpu 30 / GLES renderer altyapısı |
 | `src/android_app.rs` | winit Android uygulama döngüsü ve pencere yaşam döngüsü |
-| `build_apk.sh` | Rust kütüphanesini derleme ve APK paketleme |
+| `scripts/build-android-apk.sh` | GitHub runner üzerinde Android ARM64 derleme ve APK paketleme |
+| `.github/workflows/android-build.yml` | GitHub Actions test, bulut derlemesi ve APK artifact teslimi |
 
 Bilinen mevcut gerçekler:
 
@@ -50,8 +51,9 @@ Bilinen mevcut gerçekler:
 - Android uygulama kabuğunun ve GPU yüzeyinin gerçek cihazdaki çalışması ayrıca doğrulanmalıdır.
 - Vulkan kabiliyeti gerçek Mali sürücüsünde doğrulanmadığından mevcut renderer GLES backend'ini seçmektedir.
 - `AndroidManifest.xml` sürüm bilgisi 0.2.0 / versionCode 2 iken `build_apk.sh` içinde AAPT2 için 0.1.0 / versionCode 1 sabitlenmiştir. Bu tutarsızlık düzeltilmelidir.
-- APK betiği yerel `~/.rustblend-env` dosyasına ve geliştirici makinesindeki Android SDK/NDK araçlarına ihtiyaç duyar. Bu yerel ortam dosyası depoya eklenmez.
-- Debug imzalama anahtarı `~/.android/rustblend-debug.keystore` altında tutulur; public depoya konmaz.
+- Eski `build_apk.sh` Termux'a özel ve kullanımdan kaldırılmıştır; aktif geliştirme veya APK teslim akışında kullanılmaz.
+- Aktif `scripts/build-android-apk.sh` betiği GitHub runner'ın SDK/NDK ortamını kullanır, sürüm bilgisini `AndroidManifest.xml` dosyasından okur ve imza/hizalama/paket metadata kontrolleri yapar.
+- CI imza anahtarı runner üzerinde geçici olarak üretilir; depoya veya APK artifact'ine eklenmez. Bu nedenle ilk CI APK'sı eski yerel debug APK'nın üzerine güncellenemez.
 - Yerel `.bak` dosyaları ilk GitHub aktarımına dahil edilmemiştir. İçerikleri incelenmeden aktif kaynak koduna veya depoya geri eklenmez.
 
 ## 4. Öncelik: Aşama 0 — sağlamlaştırma
@@ -70,19 +72,19 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 
 ### 0.2. Test ve derleme taban çizgisi
 
-- [ ] Güncel kaynak üzerinde `cargo test` çalıştır; GPU eklendikten sonraki ilk gerçek test sonucunu kaydet.
+- [ ] Güncel kaynak üzerinde GitHub Actions ile `cargo test --locked` çalıştır; GPU eklendikten sonraki ilk gerçek test sonucunu kaydet.
 - [ ] Hataları sınıflandır ve düzelt; testleri atlama veya başarısız testi başarılı gibi işaretleme.
-- [ ] `cargo build --release` ile Android hedef derlemesini doğrula.
+- [ ] GitHub Actions ile `cargo build --locked --release --target aarch64-linux-android` Android hedef derlemesini doğrula.
 - [ ] Kullanılan Rust, wgpu, winit, SDK ve NDK sürümlerini gerektiğinde kaydet.
 - [ ] Gereksiz bağımlılık ekleme; eklenen her bağımlılığın gerekçesini belgele.
 
 ### 0.3. APK üretim hattını düzeltme
 
 - [x] Yeni GitHub Actions APK betiği sürüm numarasını doğrudan `AndroidManifest.xml` dosyasından okur.
-- [ ] Eski yerel `build_apk.sh` betiğindeki sabit versionCode/versionName değerlerini de tutarlı hale getir veya betiği açıkça emekliye ayır.
-- [ ] Sürüm bilgisinin iki ayrı yerde elle ve farklı değerlerle kalmasını önleyecek bir yöntem belirle.
-- [ ] APK paketinde `com.rustblend.mobile`, ARM64 `libmain.so` ve Android giriş sembollerinin bulunduğunu doğrula.
-- [ ] APK imzasını `apksigner verify` ile, 16 KB hizalamasını `zipalign -c -P 16` ile kontrol et.
+- [x] Eski Termux-only `build_apk.sh` betiği emekliye ayrıldı; aktif APK akışında kullanılmıyor.
+- [x] Sürüm bilgisi aktif cloud build betiğinde doğrudan `AndroidManifest.xml` dosyasından okunur.
+- [ ] APK paketinde `com.rustblend.mobile`, ARM64 `libmain.so` ve Android giriş sembollerinin bulunduğunu CI çıktısıyla doğrula.
+- [ ] APK imzasını `apksigner verify` ile, ZIP ve ELF 16 KB hizalamasını doğrula.
 - [ ] APK içindeki gerçek versionCode/versionName ve minSdk/targetSdk değerlerini paket metadata'sından doğrula.
 - [ ] Mevcut debug keystore'u koru. Aynı anahtarla imzalanan APK'yı eski sürümün üzerine kur; test için uygulamayı gereksiz yere kaldırma.
 - [ ] Keystore veya parolasını hiçbir koşulda Git'e ekleme.
@@ -90,7 +92,8 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 ### 0.4. GitHub Actions ve APK teslimi
 
 - [x] `.github/workflows/android-build.yml` dosyası eklendi; `main` üzerine push ve manuel workflow_dispatch ile çalışır.
-- [x] `scripts/build-android-apk.sh` Linux GitHub runner üzerinde Android ARM64 derleme ve APK paketleme için eklendi.
+- [x] `scripts/build-android-apk.sh` Linux GitHub runner üzerinde Android ARM64 derleme, NativeActivity sembolü, ELF 16 KB segment hizalaması, APK metadata, imza ve ZIP hizalama kontrolleri için eklendi.
+- [x] CI sonucu `CI_BUILD_STATUS.json` içine kaydedilecek; başarılı sonuç artifact kimliğini, başarısız sonuç GitHub Actions run bağlantısını içerir.
 - [ ] İlk GitHub Actions çalışmasının test, cross-compile, APK imza ve hizalama adımlarını geçtiğini doğrula.
 - [ ] APK artifact'ini indirip teslim et; artifact saklama süresi 14 gündür.
 - [ ] İlk bulut APK'sı geçici CI anahtarıyla imzalanır. Yerel debug imzalı eski APK üzerine güncelleme yapılamaz; ilk test kurulumunda eski APK kaldırılmalıdır.
@@ -191,6 +194,6 @@ RUSTBLEND üzerinde çalışmaya başlamadan önce `README.md` ve bu `PLAN.md` d
 - [ ] Aşama 0: güncel APK'yı üret ve doğrula.
 - [ ] Aşama 0: gerçek cihazda GPU görüntüsünü ve yaşam döngüsünü doğrula.
 
-Geliştirici cihazında Termux kullanımı artık zorunlu değildir. Kod ve CI değişiklikleri GitHub üzerinden yönetilir; APK GitHub Actions artifact'i olarak teslim edilir.
+Termux artık geliştirme sürecinin parçası değildir. Kod değişiklikleri doğrudan `main` üzerinde GitHub üzerinden yapılır; test ve APK derlemesi GitHub Actions'ta çalışır; başarılı APK artifact olarak teslim edilir.
 
 Bu liste yalnızca gerçek çıktılar görüldüğünde güncellenir.
