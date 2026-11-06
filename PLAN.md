@@ -135,9 +135,15 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [x] Zemin grid'i ve X/Y/Z dünya eksenlerini ekle.
 - [x] Seçili nesnenin kenar çizgilerini vurgula.
 - [x] Tek parmak orbit ve iki parmak pinch zoom kontrolünü ekle.
-- [ ] Sahne değiştiğinde GPU vertex/index buffer'larını kontrollü biçimde güncelle.
-- [ ] Bellek ve kaynak ömrünü yönet; her frame gereksiz buffer oluşturma.
-- [ ] Redmi Note 8 Pro'da 0.3.0 viewport görüntüsünü, dokunmatiği ve performansı doğrula.
+- [x] Sahne değiştiğinde mesh/index/edge GPU buffer'larını yeniden üret ve boş sahne durumunu güvenli yönet.
+- [x] GPU üzerinde toolbar, Outliner ve durum şeridi çiz.
+- [x] Cube ekle, kopyala, sil ve Outliner satırından seç.
+- [x] Orbit, Move, Rotate ve Scale dokunmatik araçlarını bağla.
+- [x] Edit Preview için mesh kenarları ve vertex işaretleri ekle.
+- [ ] Buffer yeniden üretimini yüksek nesne sayılarında kapasite tabanlı güncelleme ile optimize et.
+- [ ] Redmi Note 8 Pro'da 0.4.0 workspace görüntüsünü, dokunmatiği ve performansı doğrula.
+
+**0.4.0 geliştirme notu:** Edit Preview topolojiyi gösterir; gerçek vertex/edge/face deformasyonu veya undo/redo henüz yoktur.
 
 **Kabul ölçütü:** CPU sahnesindeki nesneler doğru dönüşümle GPU'da görünmeli; kamera hareketi görüntüyü güncellemeli; uygulama yaşam döngüsü testleri çalışmaya devam etmelidir. Kaynak kodunun derlenmesi cihazdaki görüntünün doğrulandığı anlamına gelmez.
 
@@ -207,7 +213,8 @@ RUSTBLEND üzerinde çalışmaya başlamadan önce `README.md` ve bu `PLAN.md` d
 - [x] Aşama 0: GitHub runner Android ARM64 release library üretti.
 - [x] Aşama 0: 0.2.0 APK üretildi; imza, metadata ve hizalama doğrulamaları geçti.
 - [x] Aşama 0: 0.2.0 düzeltme APK'sında test üçgeni kullanıcının ekran görüntüsüyle doğrulandı; ilk 0.2.0 APK siyah ekran verdiği için başarısız deneme olarak kaydedildi.
-- [ ] Aşama 1: 0.3.0 gerçek sahne viewport'unu Redmi Note 8 Pro'ya kurup küp, grid, eksenler ve dokunmatik orbit/zoom davranışını doğrula.
+- [ ] Aşama 1: 0.4.0 modelleme çalışma alanını Redmi Note 8 Pro'da doğrula: viewport, Outliner, nesne işlemleri ve dokunmatik araçlar.
+- [ ] 0.4.0: Android ARM64 build ve cihaz testi sonucunu kaydet.
 
 Termux artık geliştirme sürecinin parçası değildir. Kod değişiklikleri doğrudan `main` üzerinde GitHub üzerinden yapılır; test ve APK derlemesi GitHub Actions'ta çalışır; başarılı APK artifact olarak teslim edilir.
 

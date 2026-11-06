@@ -3,6 +3,7 @@ pub mod geometry;
 pub mod camera;
 pub mod scene;
 pub mod render;
+pub mod viewport_ui;
 
 #[cfg(target_os = "android")]
 mod gpu;

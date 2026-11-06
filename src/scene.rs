@@ -354,6 +354,115 @@ impl Scene {
         Some(removed)
     }
 
+    // Duplicates the active object and selects the new copy.
+    pub fn duplicate_active(
+        &mut self,
+        offset: Vec3,
+    ) -> Result<ObjectId, SceneError> {
+        if !offset.is_finite() {
+            return Err(SceneError::InvalidTransform);
+        }
+
+        let source = self.active_object()
+            .cloned()
+            .ok_or(SceneError::ObjectNotFound)?;
+
+        let source_transform = source.transform();
+        let transform = Transform::new(
+            source_transform.position() + offset,
+            source_transform.rotation(),
+            source_transform.scale(),
+        )?;
+
+        let name = format!("{} Copy", source.name());
+        let new_id = self.add_object_with_transform(
+            name,
+            source.mesh().clone(),
+            transform,
+        )?;
+
+        self.select(new_id)?;
+        Ok(new_id)
+    }
+
+    pub fn translate_active(
+        &mut self,
+        delta: Vec3,
+    ) -> Result<(), SceneError> {
+        if !delta.is_finite() {
+            return Err(SceneError::InvalidTransform);
+        }
+
+        let id = self.active.ok_or(SceneError::ObjectNotFound)?;
+        let current = self.get(id)
+            .ok_or(SceneError::ObjectNotFound)?
+            .transform();
+
+        let next = Transform::new(
+            current.position() + delta,
+            current.rotation(),
+            current.scale(),
+        )?;
+
+        self.get_mut(id)
+            .ok_or(SceneError::ObjectNotFound)?
+            .set_transform(next);
+
+        Ok(())
+    }
+
+    pub fn rotate_active(
+        &mut self,
+        axis: Vec3,
+        angle: f32,
+    ) -> Result<(), SceneError> {
+        let delta = Quaternion::from_axis_angle(axis, angle)
+            .ok_or(SceneError::InvalidTransform)?;
+
+        let id = self.active.ok_or(SceneError::ObjectNotFound)?;
+        let current = self.get(id)
+            .ok_or(SceneError::ObjectNotFound)?
+            .transform();
+
+        let next = Transform::new(
+            current.position(),
+            delta * current.rotation(),
+            current.scale(),
+        )?;
+
+        self.get_mut(id)
+            .ok_or(SceneError::ObjectNotFound)?
+            .set_transform(next);
+
+        Ok(())
+    }
+
+    pub fn scale_active(
+        &mut self,
+        factor: f32,
+    ) -> Result<(), SceneError> {
+        if !factor.is_finite() || factor <= 0.0 {
+            return Err(SceneError::InvalidTransform);
+        }
+
+        let id = self.active.ok_or(SceneError::ObjectNotFound)?;
+        let current = self.get(id)
+            .ok_or(SceneError::ObjectNotFound)?
+            .transform();
+
+        let next = Transform::new(
+            current.position(),
+            current.rotation(),
+            current.scale() * factor,
+        )?;
+
+        self.get_mut(id)
+            .ok_or(SceneError::ObjectNotFound)?
+            .set_transform(next);
+
+        Ok(())
+    }
+
     pub fn objects(&self) -> &[SceneObject] {
         &self.objects
     }
@@ -711,5 +820,87 @@ mod tests {
         assert!(scene.is_selected(first));
         assert!(scene.is_selected(second));
         assert_eq!(scene.active_object_id(), Some(second));
+    }
+}
+
+
+#[cfg(test)]
+mod modeling_operation_tests {
+    use super::*;
+
+    fn selected_scene() -> Scene {
+        let mut scene = Scene::new();
+        let id = scene.add_object("Cube", Mesh::cube(2.0).unwrap()).unwrap();
+        scene.select(id).unwrap();
+        scene
+    }
+
+    #[test]
+    fn duplicate_active_copies_mesh_and_selects_new_object() {
+        let mut scene = selected_scene();
+        let source_id = scene.active_object_id().unwrap();
+
+        let copy_id = scene.duplicate_active(Vec3::new(2.0, 0.0, 0.0)).unwrap();
+
+        assert_ne!(source_id, copy_id);
+        assert_eq!(scene.object_count(), 2);
+        assert_eq!(scene.active_object_id(), Some(copy_id));
+        assert_eq!(scene.active_object().unwrap().mesh().vertex_count(), 8);
+        assert_eq!(
+            scene.active_object().unwrap().transform().position(),
+            Vec3::new(2.0, 0.0, 0.0)
+        );
+    }
+
+    #[test]
+    fn translate_active_changes_only_active_position() {
+        let mut scene = selected_scene();
+
+        scene.translate_active(Vec3::new(1.0, 2.0, 3.0)).unwrap();
+
+        assert_eq!(
+            scene.active_object().unwrap().transform().position(),
+            Vec3::new(1.0, 2.0, 3.0)
+        );
+    }
+
+    #[test]
+    fn rotate_active_changes_rotation() {
+        let mut scene = selected_scene();
+
+        scene.rotate_active(Vec3::new(0.0, 1.0, 0.0), core::f32::consts::FRAC_PI_2).unwrap();
+
+        let rotation = scene.active_object().unwrap().transform().rotation();
+        let rotated = rotation.rotate_vector(Vec3::new(0.0, 0.0, 1.0)).unwrap();
+
+        assert!((rotated.x - 1.0).abs() < 0.0001);
+        assert!(rotated.z.abs() < 0.0001);
+    }
+
+    #[test]
+    fn scale_active_changes_uniform_scale() {
+        let mut scene = selected_scene();
+
+        scene.scale_active(1.5).unwrap();
+
+        assert_eq!(
+            scene.active_object().unwrap().transform().scale(),
+            Vec3::new(1.5, 1.5, 1.5)
+        );
+    }
+
+    #[test]
+    fn invalid_active_scale_is_rejected_without_mutation() {
+        let mut scene = selected_scene();
+
+        assert_eq!(
+            scene.scale_active(0.0),
+            Err(SceneError::InvalidTransform)
+        );
+
+        assert_eq!(
+            scene.active_object().unwrap().transform().scale(),
+            Vec3::new(1.0, 1.0, 1.0)
+        );
     }
 }

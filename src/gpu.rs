@@ -7,6 +7,7 @@ use crate::{
     math::{Quaternion, Vec3},
     render::RenderPacket,
     scene::{Scene, Transform},
+    viewport_ui::{self, ToolMode, UiAction},
 };
 
 use winit::{
@@ -86,11 +87,40 @@ fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
 }
 "#;
 
+const UI_SHADER: &str = r#"
+struct VertexInput {
+    @location(0) position: vec2<f32>,
+    @location(1) color: vec3<f32>,
+};
+
+struct VertexOutput {
+    @builtin(position) position: vec4<f32>,
+    @location(0) color: vec3<f32>,
+};
+
+@vertex
+fn vs_main(input: VertexInput) -> VertexOutput {
+    var output: VertexOutput;
+    output.position = vec4<f32>(input.position, 0.0, 1.0);
+    output.color = input.color;
+    return output;
+}
+
+@fragment
+fn fs_main(input: VertexOutput) -> @location(0) vec4<f32> {
+    return vec4<f32>(input.color, 1.0);
+}
+"#;
+
 const VERTEX_STRIDE: u64 = 9 * 4;
+const UI_VERTEX_STRIDE: u64 = 5 * 4;
 const DEPTH_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Depth24Plus;
 
 const MESH_ATTRIBUTES: [wgpu::VertexAttribute; 3] =
     wgpu::vertex_attr_array![0 => Float32x3, 1 => Float32x3, 2 => Float32x3];
+
+const UI_ATTRIBUTES: [wgpu::VertexAttribute; 2] =
+    wgpu::vertex_attr_array![0 => Float32x2, 1 => Float32x3];
 
 const LINE_ATTRIBUTES: [wgpu::VertexAttribute; 2] = [
     wgpu::VertexAttribute {
@@ -115,6 +145,7 @@ pub struct GpuRenderer {
 
     mesh_pipeline: wgpu::RenderPipeline,
     line_pipeline: wgpu::RenderPipeline,
+    ui_pipeline: wgpu::RenderPipeline,
 
     camera: Camera,
     camera_buffer: wgpu::Buffer,
@@ -126,6 +157,13 @@ pub struct GpuRenderer {
 
     line_vertex_buffer: wgpu::Buffer,
     line_vertex_count: u32,
+
+    ui_vertex_buffer: wgpu::Buffer,
+    ui_vertex_count: u32,
+
+    tool_mode: ToolMode,
+    edit_mode: bool,
+    outliner_open: bool,
 
     depth_texture: wgpu::Texture,
     depth_view: wgpu::TextureView,
@@ -375,6 +413,51 @@ impl GpuRenderer {
             }
         );
 
+        let ui_shader = device.create_shader_module(
+            wgpu::ShaderModuleDescriptor {
+                label: Some("RUSTBLEND Workspace UI Shader"),
+                source: wgpu::ShaderSource::Wgsl(
+                    Cow::Borrowed(UI_SHADER)
+                ),
+            }
+        );
+
+        let ui_layout = [
+            wgpu::VertexBufferLayout {
+                array_stride: UI_VERTEX_STRIDE,
+                step_mode: wgpu::VertexStepMode::Vertex,
+                attributes: &UI_ATTRIBUTES,
+            }
+        ];
+
+        let ui_pipeline = device.create_render_pipeline(
+            &wgpu::RenderPipelineDescriptor {
+                label: Some("RUSTBLEND Workspace UI Pipeline"),
+                layout: None,
+                vertex: wgpu::VertexState {
+                    module: &ui_shader,
+                    entry_point: Some("vs_main"),
+                    compilation_options: Default::default(),
+                    buffers: &[Some(ui_layout[0].clone())],
+                },
+                fragment: Some(wgpu::FragmentState {
+                    module: &ui_shader,
+                    entry_point: Some("fs_main"),
+                    compilation_options: Default::default(),
+                    targets: &color_targets,
+                }),
+                primitive: wgpu::PrimitiveState::default(),
+                depth_stencil: None,
+                multisample: wgpu::MultisampleState::default(),
+                multiview_mask: None,
+                cache: None,
+            }
+        );
+
+        let tool_mode = ToolMode::Orbit;
+        let edit_mode = false;
+        let outliner_open = true;
+
         let mut scene = Scene::new();
         let cube = Mesh::cube(2.0)
             .map_err(|error| format!("Default cube creation failed: {error:?}"))?;
@@ -411,11 +494,26 @@ impl GpuRenderer {
             wgpu::BufferUsages::INDEX,
         );
 
-        let (line_vertices, grid_vertex_count) = build_grid_and_edges(&scene)?;
+        let (line_vertices, grid_vertex_count) = build_grid_and_edges(&scene, edit_mode)?;
         let line_vertex_buffer = buffer_from_bytes(
             &device,
             "RUSTBLEND Grid and Cube Edges",
             &f32_bytes(&line_vertices),
+            wgpu::BufferUsages::VERTEX,
+        );
+
+        let ui_vertices = viewport_ui::build_vertices(
+            width,
+            height,
+            &scene,
+            tool_mode,
+            edit_mode,
+            outliner_open,
+        );
+        let ui_vertex_buffer = buffer_from_bytes(
+            &device,
+            "RUSTBLEND Workspace UI Vertex Buffer",
+            &f32_bytes(&ui_vertices),
             wgpu::BufferUsages::VERTEX,
         );
 
@@ -437,6 +535,7 @@ impl GpuRenderer {
             queue,
             mesh_pipeline,
             line_pipeline,
+            ui_pipeline,
             camera,
             camera_buffer,
             camera_bind_group,
@@ -447,6 +546,12 @@ impl GpuRenderer {
             line_vertex_buffer,
             line_vertex_count: u32::try_from(line_vertices.len() / 9)
                 .map_err(|_| "Too many viewport line vertices.".to_string())?,
+            ui_vertex_buffer,
+            ui_vertex_count: u32::try_from(ui_vertices.len() / 5)
+                .map_err(|_| "Too many UI vertices.".to_string())?,
+            tool_mode,
+            edit_mode,
+            outliner_open,
             depth_texture,
             depth_view,
             scene,
@@ -462,6 +567,282 @@ impl GpuRenderer {
 
     pub fn scene_object_count(&self) -> usize {
         self.scene.object_count()
+    }
+
+    fn refresh_scene_buffers(&mut self) -> Result<(), String> {
+        let packet = RenderPacket::from_scene(&self.scene)
+            .map_err(|error| format!("Scene render conversion failed: {error:?}"))?;
+
+        let (mesh_vertices, mesh_indices, mesh_index_count) = if packet.is_empty() {
+            (vec![0.0_f32; 9], vec![0_u32], 0_u32)
+        } else {
+            let (vertices, indices) = build_mesh_buffers(&packet)?;
+            let count = u32::try_from(indices.len())
+                .map_err(|_| "Too many scene indices.".to_string())?;
+            (vertices, indices, count)
+        };
+
+        let (line_vertices, _) = build_grid_and_edges(&self.scene, self.edit_mode)?;
+
+        self.mesh_vertex_buffer = buffer_from_bytes(
+            &self.device,
+            "RUSTBLEND Dynamic Scene Vertex Buffer",
+            &f32_bytes(&mesh_vertices),
+            wgpu::BufferUsages::VERTEX,
+        );
+        self.mesh_index_buffer = buffer_from_bytes(
+            &self.device,
+            "RUSTBLEND Dynamic Scene Index Buffer",
+            &u32_bytes(&mesh_indices),
+            wgpu::BufferUsages::INDEX,
+        );
+        self.mesh_index_count = mesh_index_count;
+
+        self.line_vertex_buffer = buffer_from_bytes(
+            &self.device,
+            "RUSTBLEND Dynamic Grid and Edge Buffer",
+            &f32_bytes(&line_vertices),
+            wgpu::BufferUsages::VERTEX,
+        );
+        self.line_vertex_count = u32::try_from(line_vertices.len() / 9)
+            .map_err(|_| "Too many viewport line vertices.".to_string())?;
+
+        Ok(())
+    }
+
+    fn refresh_ui_buffer(&mut self) -> Result<(), String> {
+        let vertices = viewport_ui::build_vertices(
+            self.surface_config.width,
+            self.surface_config.height,
+            &self.scene,
+            self.tool_mode,
+            self.edit_mode,
+            self.outliner_open,
+        );
+
+        if vertices.is_empty() || vertices.len() % 5 != 0 {
+            return Err("Workspace UI generated invalid vertex data.".to_string());
+        }
+
+        self.ui_vertex_count = u32::try_from(vertices.len() / 5)
+            .map_err(|_| "Too many workspace UI vertices.".to_string())?;
+        self.ui_vertex_buffer = buffer_from_bytes(
+            &self.device,
+            "RUSTBLEND Workspace UI Vertex Buffer",
+            &f32_bytes(&vertices),
+            wgpu::BufferUsages::VERTEX,
+        );
+
+        Ok(())
+    }
+
+    fn refresh_workspace(&mut self, refresh_scene: bool) {
+        if refresh_scene {
+            if let Err(error) = self.refresh_scene_buffers() {
+                eprintln!("RUSTBLEND: scene GPU refresh failed: {error}");
+            }
+        }
+
+        if let Err(error) = self.refresh_ui_buffer() {
+            eprintln!("RUSTBLEND: UI refresh failed: {error}");
+        }
+
+        self.window.request_redraw();
+    }
+
+    fn add_cube(&mut self) -> Result<(), String> {
+        let index = self.scene.object_count();
+        let column = (index % 4) as f32;
+        let row = (index / 4) as f32;
+        let position = Vec3::new(
+            (column - 1.5) * 1.8,
+            0.75,
+            row * 1.8,
+        );
+
+        let mesh = Mesh::cube(1.5)
+            .map_err(|error| format!("Cube creation failed: {error:?}"))?;
+        let transform = Transform::new(
+            position,
+            Quaternion::IDENTITY,
+            Vec3::new(1.0, 1.0, 1.0),
+        )
+        .map_err(|error| format!("Cube transform failed: {error:?}"))?;
+
+        let name = format!("Cube {}", index + 1);
+        let id = self.scene
+            .add_object_with_transform(name, mesh, transform)
+            .map_err(|error| format!("Scene rejected cube: {error:?}"))?;
+        self.scene.select(id)
+            .map_err(|error| format!("Cube selection failed: {error:?}"))?;
+
+        Ok(())
+    }
+
+    fn duplicate_active(&mut self) -> Result<(), String> {
+        self.scene
+            .duplicate_active(Vec3::new(1.6, 0.0, 0.0))
+            .map_err(|error| format!("Duplicate failed: {error:?}"))?;
+        Ok(())
+    }
+
+    fn delete_active(&mut self) -> bool {
+        let Some(id) = self.scene.active_object_id() else {
+            return false;
+        };
+
+        if self.scene.remove(id).is_none() {
+            return false;
+        }
+
+        if let Some(next_id) = self.scene.objects().last().map(|object| object.id()) {
+            let _ = self.scene.select(next_id);
+        }
+
+        true
+    }
+
+    pub fn is_ui_position(&self, x: f32, y: f32) -> bool {
+        viewport_ui::is_ui_position(
+            self.surface_config.width,
+            self.surface_config.height,
+            x,
+            y,
+            self.outliner_open,
+        )
+    }
+
+    pub fn handle_ui_tap(&mut self, x: f32, y: f32) -> bool {
+        let Some(action) = viewport_ui::hit_test(
+            self.surface_config.width,
+            self.surface_config.height,
+            x,
+            y,
+            &self.scene,
+            self.outliner_open,
+        ) else {
+            return false;
+        };
+
+        match action {
+            UiAction::AddCube => {
+                if let Err(error) = self.add_cube() {
+                    eprintln!("RUSTBLEND: {error}");
+                }
+                self.refresh_workspace(true);
+            }
+
+            UiAction::Duplicate => {
+                if let Err(error) = self.duplicate_active() {
+                    eprintln!("RUSTBLEND: {error}");
+                }
+                self.refresh_workspace(true);
+            }
+
+            UiAction::Delete => {
+                self.delete_active();
+                self.refresh_workspace(true);
+            }
+
+            UiAction::SetTool(tool) => {
+                self.tool_mode = if self.tool_mode == tool {
+                    ToolMode::Orbit
+                } else {
+                    tool
+                };
+                self.refresh_workspace(false);
+            }
+
+            UiAction::ToggleEdit => {
+                self.edit_mode = !self.edit_mode;
+                self.refresh_workspace(true);
+            }
+
+            UiAction::ToggleOutliner => {
+                self.outliner_open = !self.outliner_open;
+                self.refresh_workspace(false);
+            }
+
+            UiAction::SelectObject(index) => {
+                if let Some(id) = self.scene.objects().get(index).map(|object| object.id()) {
+                    let _ = self.scene.select(id);
+                    self.refresh_workspace(true);
+                }
+            }
+
+            UiAction::Ignore => {
+                return true;
+            }
+        }
+
+        true
+    }
+
+    pub fn drag_active(&mut self, delta_x: f32, delta_y: f32) {
+        if !delta_x.is_finite() || !delta_y.is_finite() {
+            return;
+        }
+
+        match self.tool_mode {
+            ToolMode::Orbit => {
+                self.orbit_camera(-delta_x * 0.006, -delta_y * 0.006);
+                return;
+            }
+
+            ToolMode::Move => {
+                let forward = (self.camera.target() - self.camera.position())
+                    .normalized()
+                    .unwrap_or(Vec3::new(0.0, 0.0, -1.0));
+                let right = forward.cross(Vec3::new(0.0, 1.0, 0.0))
+                    .normalized()
+                    .unwrap_or(Vec3::new(1.0, 0.0, 0.0));
+                let up = right.cross(forward)
+                    .normalized()
+                    .unwrap_or(Vec3::new(0.0, 1.0, 0.0));
+                let pixels_to_world = self.camera.distance()
+                    / self.surface_config.height.max(1) as f32
+                    * 1.8;
+                let delta = right * (delta_x * pixels_to_world)
+                    + up * (-delta_y * pixels_to_world);
+
+                if let Err(error) = self.scene.translate_active(delta) {
+                    eprintln!("RUSTBLEND: move failed: {error:?}");
+                    return;
+                }
+            }
+
+            ToolMode::Rotate => {
+                if let Err(error) = self.scene.rotate_active(
+                    Vec3::new(0.0, 1.0, 0.0),
+                    delta_x * 0.009,
+                ) {
+                    eprintln!("RUSTBLEND: rotate failed: {error:?}");
+                    return;
+                }
+
+                let forward = (self.camera.target() - self.camera.position())
+                    .normalized()
+                    .unwrap_or(Vec3::new(0.0, 0.0, -1.0));
+                let right = forward.cross(Vec3::new(0.0, 1.0, 0.0))
+                    .normalized()
+                    .unwrap_or(Vec3::new(1.0, 0.0, 0.0));
+
+                if let Err(error) = self.scene.rotate_active(right, delta_y * 0.009) {
+                    eprintln!("RUSTBLEND: rotate failed: {error:?}");
+                    return;
+                }
+            }
+
+            ToolMode::Scale => {
+                let factor = (-delta_y * 0.012).exp().clamp(0.65, 1.55);
+                if let Err(error) = self.scene.scale_active(factor) {
+                    eprintln!("RUSTBLEND: scale failed: {error:?}");
+                    return;
+                }
+            }
+        }
+
+        self.refresh_workspace(true);
     }
 
     pub fn orbit_camera(
@@ -517,6 +898,7 @@ impl GpuRenderer {
         self.depth_view = depth_view;
 
         self.update_camera_uniform();
+        self.refresh_workspace(false);
         self.window.request_redraw();
     }
 
@@ -632,6 +1014,33 @@ impl GpuRenderer {
             pass.draw_indexed(0..self.mesh_index_count, 0, 0..1);
         }
 
+        {
+            let mut ui_pass = encoder.begin_render_pass(
+                &wgpu::RenderPassDescriptor {
+                    label: Some("RUSTBLEND Workspace UI Overlay"),
+                    color_attachments: &[
+                        Some(wgpu::RenderPassColorAttachment {
+                            view: &view,
+                            depth_slice: None,
+                            resolve_target: None,
+                            ops: wgpu::Operations {
+                                load: wgpu::LoadOp::Load,
+                                store: wgpu::StoreOp::Store,
+                            },
+                        })
+                    ],
+                    depth_stencil_attachment: None,
+                    timestamp_writes: None,
+                    occlusion_query_set: None,
+                    multiview_mask: None,
+                }
+            );
+
+            ui_pass.set_pipeline(&self.ui_pipeline);
+            ui_pass.set_vertex_buffer(0, self.ui_vertex_buffer.slice(..));
+            ui_pass.draw(0..self.ui_vertex_count, 0..1);
+        }
+
         self.queue.submit([encoder.finish()]);
         self.window.pre_present_notify();
         self.queue.present(frame);
@@ -694,13 +1103,13 @@ fn build_mesh_buffers(
     }
 
     if vertices.is_empty() || indices.is_empty() {
-        return Err("The initial scene does not contain drawable mesh geometry.".to_string());
+        return Err("Scene has no drawable mesh geometry.".to_string());
     }
 
     Ok((vertices, indices))
 }
 
-fn build_grid_and_edges(scene: &Scene) -> Result<(Vec<f32>, u32), String> {
+fn build_grid_and_edges(scene: &Scene, edit_mode: bool) -> Result<(Vec<f32>, u32), String> {
     let mut vertices = Vec::new();
     let extent = 12.0_f32;
 
@@ -779,6 +1188,35 @@ fn build_grid_and_edges(scene: &Scene) -> Result<(Vec<f32>, u32), String> {
                 end,
                 edge_color,
             );
+        }
+
+        if edit_mode {
+            for local_vertex in object.mesh().vertices() {
+                let point = model
+                    .transform_point(*local_vertex)
+                    .ok_or_else(|| "Invalid edit-mode vertex.".to_string())?;
+                let radius = 0.045;
+                let marker = [1.0, 0.76, 0.24];
+
+                push_line(
+                    &mut vertices,
+                    point + Vec3::new(-radius, 0.0, 0.0),
+                    point + Vec3::new(radius, 0.0, 0.0),
+                    marker,
+                );
+                push_line(
+                    &mut vertices,
+                    point + Vec3::new(0.0, -radius, 0.0),
+                    point + Vec3::new(0.0, radius, 0.0),
+                    marker,
+                );
+                push_line(
+                    &mut vertices,
+                    point + Vec3::new(0.0, 0.0, -radius),
+                    point + Vec3::new(0.0, 0.0, radius),
+                    marker,
+                );
+            }
         }
     }
 

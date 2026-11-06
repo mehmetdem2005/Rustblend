@@ -21,11 +21,18 @@ use winit::{
     },
 };
 
+#[derive(Debug, Clone, Copy)]
+struct TouchState {
+    start: (f64, f64),
+    last: (f64, f64),
+    moved: bool,
+}
+
 #[derive(Default)]
 struct RustBlendApp {
     window: Option<Arc<Window>>,
     renderer: Option<GpuRenderer>,
-    touches: HashMap<u64, (f64, f64)>,
+    touches: HashMap<u64, TouchState>,
 }
 
 impl RustBlendApp {
@@ -37,41 +44,71 @@ impl RustBlendApp {
     ) {
         match phase {
             TouchPhase::Started => {
-                self.touches.insert(id, position);
+                self.touches.insert(id, TouchState {
+                    start: position,
+                    last: position,
+                    moved: false,
+                });
             }
 
             TouchPhase::Moved => {
-                let previous = self.touches.get(&id).copied();
-                self.touches.insert(id, position);
-
-                let Some(previous) = previous else {
+                let Some(previous_state) = self.touches.get(&id).copied() else {
                     return;
                 };
 
                 if self.touches.len() == 1 {
-                    let delta_x = (position.0 - previous.0) as f32;
-                    let delta_y = (position.1 - previous.1) as f32;
+                    let delta_x = (position.0 - previous_state.last.0) as f32;
+                    let delta_y = (position.1 - previous_state.last.1) as f32;
+                    let moved = distance(previous_state.start, position) > 8.0;
+                    let start = previous_state.start;
 
-                    if let Some(renderer) = self.renderer.as_mut() {
-                        renderer.orbit_camera(
-                            -delta_x * 0.006,
-                            -delta_y * 0.006,
-                        );
+                    if let Some(state) = self.touches.get_mut(&id) {
+                        state.last = position;
+                        state.moved |= moved;
+                    }
+
+                    if moved {
+                        if let Some(renderer) = self.renderer.as_mut() {
+                            if !renderer.is_ui_position(start.0 as f32, start.1 as f32) {
+                                renderer.drag_active(delta_x, delta_y);
+                            }
+                        }
                     }
                 } else if self.touches.len() == 2 {
                     let other = self.touches.iter()
-                        .find_map(|(&other_id, &other_position)| {
-                            (other_id != id).then_some(other_position)
+                        .find_map(|(&other_id, state)| {
+                            (other_id != id).then_some(*state)
                         });
 
-                    if let Some(other) = other {
-                        let old_distance = distance(previous, other);
-                        let new_distance = distance(position, other);
+                    if let Some(other_state) = other {
+                        let old_distance = distance(previous_state.last, other_state.last);
+                        let new_distance = distance(position, other_state.last);
 
-                        if old_distance > 1.0 && new_distance > 1.0 {
-                            let factor = (old_distance / new_distance)
-                                .clamp(0.75, 1.33) as f32;
+                        if let Some(state) = self.touches.get_mut(&id) {
+                            state.last = position;
+                            state.moved = true;
+                        }
+                        let other_id = self.touches.keys()
+                            .copied()
+                            .find(|other_id| *other_id != id);
+                        if let Some(other_id) = other_id {
+                            if let Some(state) = self.touches.get_mut(&other_id) {
+                                state.moved = true;
+                            }
+                        }
 
+                        let touches_on_ui = self.renderer.as_ref().is_some_and(|renderer| {
+                            renderer.is_ui_position(
+                                previous_state.start.0 as f32,
+                                previous_state.start.1 as f32,
+                            ) || renderer.is_ui_position(
+                                other_state.start.0 as f32,
+                                other_state.start.1 as f32,
+                            )
+                        });
+
+                        if !touches_on_ui && old_distance > 1.0 && new_distance > 1.0 {
+                            let factor = (old_distance / new_distance).clamp(0.75, 1.33) as f32;
                             if let Some(renderer) = self.renderer.as_mut() {
                                 renderer.zoom_camera(factor);
                             }
@@ -80,9 +117,31 @@ impl RustBlendApp {
                 }
             }
 
-            TouchPhase::Ended | TouchPhase::Cancelled => {
+            TouchPhase::Ended => {
+                let active_count = self.touches.len();
+                let state = self.touches.remove(&id);
+
+                if active_count == 1 {
+                    if let Some(state) = state {
+                        if !state.moved {
+                            if let Some(renderer) = self.renderer.as_mut() {
+                                renderer.handle_ui_tap(
+                                    position.0 as f32,
+                                    position.1 as f32,
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            TouchPhase::Cancelled => {
                 self.touches.remove(&id);
             }
+        }
+
+        if let Some(window) = self.window.as_ref() {
+            window.request_redraw();
         }
     }
 }
@@ -103,7 +162,7 @@ impl ApplicationHandler for RustBlendApp {
 
         let window = match event_loop.create_window(
             Window::default_attributes()
-                .with_title("RUSTBLEND 3D Viewport")
+                .with_title("RUSTBLEND Modeling Workspace")
         ) {
             Ok(window) => Arc::new(window),
 
@@ -116,7 +175,7 @@ impl ApplicationHandler for RustBlendApp {
 
         let display = event_loop.owned_display_handle();
 
-        eprintln!("RUSTBLEND: Initializing 3D viewport.");
+        eprintln!("RUSTBLEND: Initializing modeling workspace.");
 
         let renderer = pollster::block_on(
             GpuRenderer::new(display, window.clone())
@@ -131,7 +190,7 @@ impl ApplicationHandler for RustBlendApp {
                 );
 
                 eprintln!(
-                    "RUSTBLEND: 3D viewport ready on {gpu_name}; objects={}.",
+                    "RUSTBLEND: Modeling workspace ready on {gpu_name}; objects={}.",
                     renderer.scene_object_count()
                 );
 
@@ -144,9 +203,9 @@ impl ApplicationHandler for RustBlendApp {
             }
 
             Err(error) => {
-                eprintln!("RUSTBLEND: 3D viewport initialization failed: {error}");
+                eprintln!("RUSTBLEND: Modeling workspace initialization failed: {error}");
 
-                window.set_title("RUSTBLEND - VIEWPORT ERROR");
+                window.set_title("RUSTBLEND - WORKSPACE ERROR");
 
                 self.window = Some(window);
                 self.renderer = None;
@@ -191,20 +250,11 @@ impl ApplicationHandler for RustBlendApp {
             }
 
             WindowEvent::Touch(touch) => {
-                let position = (
-                    touch.location.x,
-                    touch.location.y,
-                );
-
                 self.handle_touch(
                     touch.phase,
                     touch.id,
-                    position,
+                    (touch.location.x, touch.location.y),
                 );
-
-                if let Some(window) = self.window.as_ref() {
-                    window.request_redraw();
-                }
             }
 
             WindowEvent::RedrawRequested => {

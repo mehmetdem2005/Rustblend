@@ -108,6 +108,19 @@ The old Termux-only `build_apk.sh` is deprecated and is not used
 by the GitHub Actions build. The active cloud build script is
 `scripts/build-android-apk.sh`.
 
+## Current workspace milestone (0.4.0)
+
+The Android viewport now includes a touch-first modeling workspace:
+
+- Add, duplicate, and delete cube objects.
+- Select scene objects from the Outliner panel.
+- Drag the viewport in Orbit, Move, Rotate, or Scale mode.
+- Toggle Edit Preview to display mesh edges and vertex markers.
+- GPU scene buffers are rebuilt when scene objects or transforms change.
+- The compact toolbar, Outliner, and status strip are rendered by the native GPU renderer.
+
+The Edit Preview currently visualizes mesh topology; direct vertex/edge/face deformation, undo/redo, and project file import/export remain future work.
+
 ## Development roadmap
 
 See [PLAN.md](PLAN.md) for the current technical status, stabilization checklist, development phases, and acceptance criteria. Read it before continuing work in a new session.
