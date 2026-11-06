@@ -88,7 +88,8 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [x] ZIP hizalaması ve ELF LOAD segmentlerinin tamamında 16 KB hizalama doğrulandı.
 - [x] Paket metadata'sı doğrulandı: versionCode 2, versionName 0.2.0, minSdk 23, targetSdk 30.
 - [x] CI geçici imza anahtarını runner üzerinde üretir; özel anahtar depoya eklenmez.
-- [ ] İlk CI imzalı APK'yı eski yerel debug imzalı sürüm üzerine güncelleme; imza farklı olduğundan temiz kurulum gerekir. Kalıcı imza için eski keystore dosyası güvenli şekilde GitHub Actions secret'larına taşınmalıdır.
+- [ ] Mevcut CI her çalışmada yeni geçici anahtar ürettiği için her yeni APK temiz kurulum gerektirir.
+- [ ] Güncelleme kurulumlarını desteklemek için kalıcı imza keystore'unu GitHub Actions Secrets üzerinden yapılandır; hiçbir zaman public depoya ekleme.
 - [ ] Keystore veya parolasını hiçbir koşulda Git'e ekleme.
 
 ### 0.4. GitHub Actions ve APK teslimi
