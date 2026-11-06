@@ -32,6 +32,8 @@ impl ApplicationHandler for RustBlendApp {
             return;
         }
 
+        eprintln!("RUSTBLEND: Android activity resumed.");
+
         let window = match event_loop.create_window(
             Window::default_attributes()
                 .with_title("RUSTBLEND")
@@ -39,14 +41,15 @@ impl ApplicationHandler for RustBlendApp {
             Ok(window) => Arc::new(window),
 
             Err(error) => {
-                eprintln!("Android penceresi oluşturulamadı: {error}");
+                eprintln!("RUSTBLEND: Android window creation failed: {error}");
                 event_loop.exit();
                 return;
             }
         };
 
-        // wgpu başlatılırken Android ekran tanıtıcısını veriyoruz.
         let display = event_loop.owned_display_handle();
+
+        eprintln!("RUSTBLEND: Initializing GPU renderer.");
 
         let renderer = pollster::block_on(
             GpuRenderer::new(display, window.clone())
@@ -60,33 +63,41 @@ impl ApplicationHandler for RustBlendApp {
                     &format!("RUSTBLEND | {gpu_name}")
                 );
 
-                eprintln!("RUSTBLEND GPU: {gpu_name}");
+                eprintln!("RUSTBLEND: GPU renderer ready: {gpu_name}");
 
                 self.window = Some(window.clone());
                 self.renderer = Some(renderer);
 
+                // Continuous redraw is paced by the surface's VSync mode.
+                event_loop.set_control_flow(ControlFlow::Poll);
                 window.request_redraw();
             }
 
             Err(error) => {
-                eprintln!("RUSTBLEND GPU başlatma hatası: {error}");
+                eprintln!("RUSTBLEND: GPU initialization failed: {error}");
 
-                window.set_title("RUSTBLEND - GPU HATASI");
+                window.set_title("RUSTBLEND - GPU INITIALIZATION FAILED");
 
                 self.window = Some(window);
+                self.renderer = None;
+
+                // Do not spin the CPU when the renderer could not start.
+                event_loop.set_control_flow(ControlFlow::Wait);
             }
         }
     }
 
-    // Android uygulaması arka plana geçtiğinde GPU yüzeyini bırak.
-    fn suspended(&mut self, _event_loop: &ActiveEventLoop) {
+    fn suspended(&mut self, event_loop: &ActiveEventLoop) {
+        eprintln!("RUSTBLEND: Android activity suspended.");
+
+        event_loop.set_control_flow(ControlFlow::Wait);
         self.renderer = None;
         self.window = None;
     }
 
     fn window_event(
         &mut self,
-        event_loop: &ActiveEventLoop,
+        _event_loop: &ActiveEventLoop,
         window_id: WindowId,
         event: WindowEvent,
     ) {
@@ -99,19 +110,22 @@ impl ApplicationHandler for RustBlendApp {
         }
 
         match event {
-            WindowEvent::CloseRequested => {
-                event_loop.exit();
-            }
+            WindowEvent::CloseRequested => {}
 
             WindowEvent::Resized(size) => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.resize(size);
+                    window.request_redraw();
                 }
             }
 
             WindowEvent::RedrawRequested => {
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.render();
+
+                    // Keep requesting frames so a transient first-frame or
+                    // surface-acquisition timeout cannot leave the app black.
+                    window.request_redraw();
                 }
             }
 
@@ -129,17 +143,16 @@ pub fn run(app: AndroidApp) {
         Ok(event_loop) => event_loop,
 
         Err(error) => {
-            eprintln!("Android event loop hatası: {error}");
+            eprintln!("RUSTBLEND: Android event loop creation failed: {error}");
             return;
         }
     };
 
-    // Boştayken işlemciyi sürekli meşgul etme.
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let mut application = RustBlendApp::default();
 
     if let Err(error) = event_loop.run_app(&mut application) {
-        eprintln!("RUSTBLEND uygulama döngüsü hatası: {error}");
+        eprintln!("RUSTBLEND: Android application loop failed: {error}");
     }
 }
