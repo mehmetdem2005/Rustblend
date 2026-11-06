@@ -82,14 +82,30 @@ Never commit:
 - Personal credentials.
 - Local environment files.
 
-## Build
+## Tests and Android APK builds
 
-The Android build process is managed by:
+Development builds and automated checks run on GitHub Actions;
+a local Termux environment is not required.
 
-`build_apk.sh`
+Workflow: [Android Build](.github/workflows/android-build.yml)
 
-The generated APK and temporary build artifacts are not
-stored in Git.
+On every push to `main`, GitHub Actions:
+1. Runs the Rust unit tests with `cargo test --locked`.
+2. Cross-compiles the Android ARM64 native library using the Android NDK.
+3. Packages, signs, and verifies the APK.
+4. Publishes the installable APK as a workflow artifact for 14 days.
+
+Open the repository's **Actions** tab, select the latest successful
+"RUSTBLEND Android Build" run, and download its APK artifact.
+
+The cloud build currently uses a temporary CI signing key. The first
+cloud-signed APK therefore cannot update an APK signed with the old
+local debug key; uninstall the old test app before installing the
+first cloud build. A persistent protected signing key can be configured
+later through GitHub Actions secrets.
+
+The legacy `build_apk.sh` is retained for reference and is not used
+by the GitHub Actions build.
 
 ## Development roadmap
 
