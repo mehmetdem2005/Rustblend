@@ -140,10 +140,15 @@ Yeni modelleme özelliklerine başlamadan önce mevcut temel doğrulanacaktır.
 - [x] Cube ekle, kopyala, sil ve Outliner satırından seç.
 - [x] Orbit, Move, Rotate ve Scale dokunmatik araçlarını bağla.
 - [x] Edit Preview için mesh kenarları ve vertex işaretleri ekle.
+- [x] GitHub Actions run #22: 90/90 Rust testi geçti; Android ARM64 release library ve APK başarılı şekilde üretildi.
+- [x] GitHub Actions run #22: APK v1/v2/v3 imzaları, ZIP/ELF 16 KB hizalaması ve `com.rustblend.mobile` 0.4.0 paket bilgileri doğrulandı.
+- [x] Artifact `13537772781` indirildi, ZIP arşivinden `RUSTBLEND.apk` çıkarıldı ve APK dosyasının varlığı doğrulandı. SHA-256: `723d48caef499b2f7d45b6a57e8f5d5bdd9d0d07a9b748c1fc6b0848d5a60191`.
 - [ ] Buffer yeniden üretimini yüksek nesne sayılarında kapasite tabanlı güncelleme ile optimize et.
 - [ ] Redmi Note 8 Pro'da 0.4.0 workspace görüntüsünü, dokunmatiği ve performansı doğrula.
 
 **0.4.0 geliştirme notu:** Edit Preview topolojiyi gösterir; gerçek vertex/edge/face deformasyonu veya undo/redo henüz yoktur.
+
+**0.4.0 build kaydı:** [GitHub Actions run #22](https://github.com/mehmetdem2005/Rustblend/actions/runs/42287043377) başarılı; 90/90 test, ARM64 cross-compile, APK paketleme, imza ve hizalama adımları geçti. Gerçek Redmi Note 8 Pro cihaz testi beklemede.
 
 **Kabul ölçütü:** CPU sahnesindeki nesneler doğru dönüşümle GPU'da görünmeli; kamera hareketi görüntüyü güncellemeli; uygulama yaşam döngüsü testleri çalışmaya devam etmelidir. Kaynak kodunun derlenmesi cihazdaki görüntünün doğrulandığı anlamına gelmez.
 
