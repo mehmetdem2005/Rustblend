@@ -91,6 +91,10 @@ The Android build process is managed by:
 The generated APK and temporary build artifacts are not
 stored in Git.
 
+## Development roadmap
+
+See [PLAN.md](PLAN.md) for the current technical status, stabilization checklist, development phases, and acceptance criteria. Read it before continuing work in a new session.
+
 ## Repository policy
 
 This is a public repository.
