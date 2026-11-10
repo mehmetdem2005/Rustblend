@@ -2,7 +2,8 @@
 //! No GPU resources or undo history are persisted. FNV detects accidental
 //! corruption; it is not authentication. All decoded geometry is validated.
 use std::{fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}};
-use crate::{Camera, Edge, Face, Mesh, Quaternion, Scene, Transform, Vec3,
+use crate::math::Quaternion;
+use crate::{Camera, Edge, Face, Mesh, Scene, Transform, Vec3,
     viewport_ui::ToolMode, workspace::WorkspaceState};
 
 const MAGIC: &[u8; 8] = b"RBLEND01";
