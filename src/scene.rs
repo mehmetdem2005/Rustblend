@@ -110,7 +110,7 @@ impl Default for Transform {
     }
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct SceneObject {
     id: ObjectId,
     name: String,
@@ -144,7 +144,7 @@ impl SceneObject {
     }
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone, PartialEq)]
 pub struct Scene {
     objects: Vec<SceneObject>,
     next_id: u64,

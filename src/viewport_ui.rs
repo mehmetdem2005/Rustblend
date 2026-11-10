@@ -24,6 +24,8 @@ impl ToolMode {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiAction {
+    Undo,
+    Redo,
     AddCube,
     Duplicate,
     Delete,
@@ -35,7 +37,7 @@ pub enum UiAction {
 }
 
 const TOOLBAR_HEIGHT: f32 = 68.0;
-const FOOTER_HEIGHT: f32 = 28.0;
+const FOOTER_HEIGHT: f32 = 48.0;
 const BUTTON_TOP: f32 = 8.0;
 const BUTTON_HEIGHT: f32 = 52.0;
 const BUTTON_GAP: f32 = 4.0;
@@ -116,7 +118,9 @@ pub fn hit_test(
     }
 
     if y >= height_px - FOOTER_HEIGHT {
-        return Some(UiAction::Ignore);
+        return Some(if x < 72.0 { UiAction::Undo }
+            else if x < 144.0 { UiAction::Redo }
+            else { UiAction::Ignore });
     }
 
     if outliner_open {
@@ -318,6 +322,11 @@ pub fn build_vertices(
         [0.025, 0.033, 0.052],
     );
 
+    for (label, x) in [("UNDO", 12.0), ("REDO", 84.0)] {
+        text(&mut vertices, width_px, height_px, label, x,
+            height_px - 20.0, 2.0, [0.94, 0.96, 1.0]);
+    }
+
     let active_name = scene.active_object()
         .map(|object| object.name().to_uppercase())
         .unwrap_or_else(|| "NO OBJECT".to_string());
@@ -339,7 +348,7 @@ pub fn build_vertices(
         width_px,
         height_px,
         &status,
-        10.0,
+        156.0,
         height_px - 9.0,
         1.0,
         [0.68, 0.75, 0.86],

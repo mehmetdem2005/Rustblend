@@ -89,14 +89,11 @@ a local Termux environment is not required.
 
 Workflow: [Android Build](.github/workflows/android-build.yml)
 
-On every push to `main`, GitHub Actions:
-1. Runs the Rust unit tests with `cargo test --locked`.
-2. Cross-compiles the Android ARM64 native library using the Android NDK.
-3. Packages, signs, and verifies the APK.
-4. Publishes the installable APK as a workflow artifact for 14 days.
-
-Open the repository's **Actions** tab, select the latest successful
-"RUSTBLEND Android Build" run, and download its APK artifact.
+On every push to `main`, GitHub Actions runs `cargo test --locked` and
+`cargo check --locked --target aarch64-linux-android`. No APK is packaged.
+At a meaningful device-review milestone, manually run the workflow on `main`
+with `build_apk=true` to build, sign, verify and upload an APK (14-day retention).
+A passing native check is not a release build or a device test.
 
 The current cloud workflow generates a fresh temporary signing key on
 each run. Therefore, each APK must be installed as a clean install after
@@ -135,3 +132,18 @@ This is a public repository.
 
 The single-branch `main` policy is mandatory for all future
 development and contributions.
+
+## Professional roadmap and current stabilization work
+
+See [the comprehensive architecture and professional roadmap](docs/PROFESSIONAL_ROADMAP.md).
+The first stabilization change preserves CPU scene, camera, selection and tool state
+across Android suspend/resume, retaining the snapshot if GPU reconstruction fails.
+This is an in-memory lifecycle bridge, not disk persistence or complete document/renderer
+separation. Process death recovery and the reported startup crash remain open.
+Device verification: add/transform objects, change camera/tool, background/resume twice;
+check objects, selection and camera survive. Also repeat with an empty scene.
+
+Scene undo/redo is available in the bottom bar. Object add/duplicate/delete and
+transform drags are recorded; one drag is one step, and cancelled touch gestures
+restore the previous scene. History is currently limited to 32 snapshots, and
+survives suspend/resume together with the workspace. Disk persistence is pending.

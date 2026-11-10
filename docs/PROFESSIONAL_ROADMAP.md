@@ -278,3 +278,16 @@ Kullanıcı proje başlatır/açar, hassas modelleme yapar, hatasını geri alı
 - [Android yaşam döngüsü](../src/android_app.rs)
 - [GPU](../src/gpu.rs), [mesh](../src/geometry/mesh.rs), [render](../src/render.rs), [UI](../src/viewport_ui.rs)
 - [Doğrulanmış eski build #24](https://github.com/mehmetdem2005/Rustblend/actions/runs/42289385503)
+
+## Uygulama kaydı — 10 Kasım 2026
+
+İlk kontrollü paket: CPU workspace suspend/resume köprüsü ve yeniden kurulum
+başarısızlığında snapshot koruma; nesne işlemleri ve transformlar için 32 adımlık
+snapshot geçmişi; tek sürüklemenin tek adım olması; iptal edilen dokunuşta geri
+alma; alt şeritte Undo/Redo. Geçmiş de suspend durumuyla taşınır.
+Bu henüz delta geçmişi, disk kaydı, tam komut mimarisi veya süreç ölümü kurtarması
+değildir. Snapshot maliyeti büyük meshler için ayrıca bütçelenecektir.
+
+CI push üzerinde Rust testleri ve Android hedef kontrolü yapar. APK paketleme,
+yalnızca anlamlı cihaz kontrolü aşamasında manuel build_apk=true ile çalışır.
+Tek dal main kuralı devam eder. Açılış hatasının gerçek cihaz doğrulaması açıktır.

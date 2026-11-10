@@ -169,6 +169,7 @@ pub struct GpuRenderer {
     depth_view: wgpu::TextureView,
 
     scene: Scene,
+    history: crate::history::History,
     window: Arc<Window>,
     adapter_name: String,
     first_frame_presented: bool,
@@ -581,10 +582,37 @@ impl GpuRenderer {
             depth_texture,
             depth_view,
             scene,
+            history: Default::default(),
             window,
             adapter_name,
             first_frame_presented: false,
         })
+    }
+
+    /// Move CPU state out before Android releases the GPU surface.
+    pub fn into_workspace(mut self) -> crate::workspace::WorkspaceState {
+        self.history.commit(&self.scene);
+        crate::workspace::WorkspaceState {
+            history: self.history,
+            scene: self.scene, camera: self.camera, tool: self.tool_mode,
+            edit_mode: self.edit_mode, outliner_open: self.outliner_open,
+        }
+    }
+
+    /// Keep the caller's snapshot intact if GPU reconstruction fails.
+    pub fn restore_workspace(&mut self, saved: &crate::workspace::WorkspaceState) -> Result<(), String> {
+        self.scene = saved.scene.clone();
+        self.history = saved.history.clone();
+        self.camera = saved.camera;
+        self.camera.set_viewport(self.surface_config.width, self.surface_config.height)
+            .map_err(|error| format!("Workspace camera restore failed: {error:?}"))?;
+        self.tool_mode = saved.tool;
+        self.edit_mode = saved.edit_mode;
+        self.outliner_open = saved.outliner_open;
+        self.update_camera_uniform();
+        self.refresh_scene_buffers()?;
+        self.refresh_ui_buffer()?;
+        Ok(())
     }
 
     pub fn adapter_name(&self) -> &str {
@@ -750,7 +778,17 @@ impl GpuRenderer {
             return false;
         };
 
+        let edits_scene = matches!(action, UiAction::AddCube | UiAction::Duplicate | UiAction::Delete);
+        if edits_scene { self.history.begin(&self.scene); }
         match action {
+            UiAction::Undo => {
+                self.history.undo(&mut self.scene);
+                self.refresh_workspace(true);
+            }
+            UiAction::Redo => {
+                self.history.redo(&mut self.scene);
+                self.refresh_workspace(true);
+            }
             UiAction::AddCube => {
                 if let Err(error) = self.add_cube() {
                     eprintln!("RUSTBLEND: {error}");
@@ -801,7 +839,17 @@ impl GpuRenderer {
             }
         }
 
+        if edits_scene { self.history.commit(&self.scene); }
         true
+    }
+
+    pub fn finish_drag(&mut self, cancel: bool) {
+        if cancel {
+            self.history.cancel(&mut self.scene);
+            self.refresh_workspace(true);
+        } else {
+            self.history.commit(&self.scene);
+        }
     }
 
     pub fn drag_active(&mut self, delta_x: f32, delta_y: f32) {
@@ -809,6 +857,9 @@ impl GpuRenderer {
             return;
         }
 
+        if self.tool_mode != ToolMode::Orbit {
+            self.history.begin(&self.scene);
+        }
         match self.tool_mode {
             ToolMode::Orbit => {
                 self.orbit_camera(-delta_x * 0.006, -delta_y * 0.006);

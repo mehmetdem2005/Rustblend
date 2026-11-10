@@ -1,10 +1,15 @@
-name: RUSTBLEND Android Build
+name: RUSTBLEND Checks and Optional APK
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      build_apk:
+        description: 'Package a device-review APK only at a meaningful milestone'
+        type: boolean
+        default: false
 
 permissions:
   contents: write
@@ -15,7 +20,7 @@ concurrency:
 
 jobs:
   android:
-    name: Test and build Android APK
+    name: Test and check Android
     runs-on: ubuntu-24.04
     timeout-minutes: 45
 
@@ -69,10 +74,15 @@ jobs:
       - name: Run Rust unit tests
         run: cargo test --locked
 
+      - name: Check Android native code without packaging
+        run: cargo check --locked --target aarch64-linux-android
+
       - name: Build and package APK
+        if: github.event_name == 'workflow_dispatch' && inputs.build_apk
         run: bash scripts/build-android-apk.sh
 
       - name: Upload installable APK
+        if: github.event_name == 'workflow_dispatch' && inputs.build_apk
         id: upload-apk
         uses: actions/upload-artifact@v4
         with:
@@ -82,7 +92,7 @@ jobs:
           retention-days: 14
 
       - name: Record build result for automatic APK retrieval
-        if: always()
+        if: always() && github.event_name == 'workflow_dispatch' && inputs.build_apk
         uses: actions/github-script@v7
         env:
           BUILD_OUTCOME: ${{ job.status }}

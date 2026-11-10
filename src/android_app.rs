@@ -33,6 +33,7 @@ struct RustBlendApp {
     window: Option<Arc<Window>>,
     renderer: Option<GpuRenderer>,
     touches: HashMap<u64, TouchState>,
+    suspended_workspace: Option<crate::workspace::WorkspaceState>,
 }
 
 impl RustBlendApp {
@@ -44,6 +45,11 @@ impl RustBlendApp {
     ) {
         match phase {
             TouchPhase::Started => {
+                if !self.touches.is_empty() {
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        renderer.finish_drag(false);
+                    }
+                }
                 self.touches.insert(id, TouchState {
                     start: position,
                     last: position,
@@ -118,6 +124,9 @@ impl RustBlendApp {
             }
 
             TouchPhase::Ended => {
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.finish_drag(false);
+                }
                 let active_count = self.touches.len();
                 let state = self.touches.remove(&id);
 
@@ -136,7 +145,10 @@ impl RustBlendApp {
             }
 
             TouchPhase::Cancelled => {
-                self.touches.remove(&id);
+                if let Some(renderer) = self.renderer.as_mut() {
+                    renderer.finish_drag(true);
+                }
+                self.touches.clear();
             }
         }
 
@@ -181,9 +193,13 @@ impl ApplicationHandler for RustBlendApp {
 
         let renderer_attempt = std::panic::catch_unwind(
             std::panic::AssertUnwindSafe(|| {
-                pollster::block_on(
+                let mut renderer = pollster::block_on(
                     GpuRenderer::new(display, window.clone())
-                )
+                )?;
+                if let Some(saved) = self.suspended_workspace.as_ref() {
+                    renderer.restore_workspace(saved)?;
+                }
+                Ok::<_, String>(renderer)
             })
         );
 
@@ -215,6 +231,7 @@ impl ApplicationHandler for RustBlendApp {
 
                 self.window = Some(window.clone());
                 self.renderer = Some(renderer);
+                self.suspended_workspace = None;
                 self.touches.clear();
 
                 event_loop.set_control_flow(ControlFlow::Poll);
@@ -238,7 +255,9 @@ impl ApplicationHandler for RustBlendApp {
         eprintln!("RUSTBLEND: Android activity suspended.");
 
         event_loop.set_control_flow(ControlFlow::Wait);
-        self.renderer = None;
+        if let Some(renderer) = self.renderer.take() {
+            self.suspended_workspace = Some(renderer.into_workspace());
+        }
         self.window = None;
         self.touches.clear();
     }

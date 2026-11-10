@@ -4,6 +4,8 @@ pub mod camera;
 pub mod scene;
 pub mod render;
 pub mod viewport_ui;
+pub mod workspace;
+pub mod history;
 
 #[cfg(target_os = "android")]
 mod gpu;
