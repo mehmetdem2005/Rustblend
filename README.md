@@ -139,11 +139,17 @@ See [the comprehensive architecture and professional roadmap](docs/PROFESSIONAL_
 The first stabilization change preserves CPU scene, camera, selection and tool state
 across Android suspend/resume, retaining the snapshot if GPU reconstruction fails.
 This is an in-memory lifecycle bridge, not disk persistence or complete document/renderer
-separation. Process death recovery and the reported startup crash remain open.
+separation. Disk recovery now restores the last completed save after process death; the reported startup crash and real-device validation remain open.
 Device verification: add/transform objects, change camera/tool, background/resume twice;
 check objects, selection and camera survive. Also repeat with an empty scene.
 
 Scene undo/redo is available in the bottom bar. Object add/duplicate/delete and
 transform drags are recorded; one drag is one step, and cancelled touch gestures
 restore the previous scene. History is currently limited to 32 snapshots, and
-survives suspend/resume together with the workspace. Disk persistence is pending.
+survives suspend/resume together with the workspace. Automatic private-file recovery is now implemented; see [project format and recovery](docs/PROJECT_FORMAT.md).
+
+Automatic recovery saves the current workspace at gesture boundaries and on
+suspend/close. Startup chooses the newest valid of two committed slots. The
+footer reports save/restore failures; unreadable or future-version recovery
+blocks automatic overwrite. This does not yet provide a file-picker project
+manager or external backup, and undo history is not persisted across process death.

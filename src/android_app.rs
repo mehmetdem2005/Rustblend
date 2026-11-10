@@ -34,9 +34,24 @@ struct RustBlendApp {
     renderer: Option<GpuRenderer>,
     touches: HashMap<u64, TouchState>,
     suspended_workspace: Option<crate::workspace::WorkspaceState>,
+    recovery: Option<crate::project::RecoveryStore>,
 }
 
 impl RustBlendApp {
+    fn save_recovery(&mut self) {
+        let Some(store) = self.recovery.as_mut() else { return; };
+        let result = if let Some(renderer) = self.renderer.as_ref() {
+            store.save(&renderer.recovery_snapshot())
+        } else if let Some(state) = self.suspended_workspace.as_ref() {
+            store.save(state)
+        } else { return; };
+        let status = match result {
+            Ok(()) => "SAVED",
+            Err(error) => { eprintln!("RUSTBLEND recovery save failed: {error}"); "SAVE FAILED" }
+        };
+        if let Some(renderer) = self.renderer.as_mut() { renderer.set_recovery_status(status); }
+    }
+
     fn handle_touch(
         &mut self,
         phase: TouchPhase,
@@ -152,6 +167,9 @@ impl RustBlendApp {
             }
         }
 
+        if self.touches.is_empty() && matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
+            self.save_recovery();
+        }
         if let Some(window) = self.window.as_ref() {
             window.request_redraw();
         }
@@ -217,7 +235,9 @@ impl ApplicationHandler for RustBlendApp {
         };
 
         match renderer {
-            Ok(renderer) => {
+            Ok(mut renderer) => {
+                renderer.set_recovery_status(if self.recovery.is_none() { "RECOVERY BLOCKED" }
+                    else if self.suspended_workspace.is_some() { "RESTORED" } else { "NOT SAVED" });
                 let gpu_name = renderer.adapter_name().to_owned();
 
                 window.set_title(
@@ -258,6 +278,7 @@ impl ApplicationHandler for RustBlendApp {
         if let Some(renderer) = self.renderer.take() {
             self.suspended_workspace = Some(renderer.into_workspace());
         }
+        self.save_recovery();
         self.window = None;
         self.touches.clear();
     }
@@ -278,6 +299,7 @@ impl ApplicationHandler for RustBlendApp {
 
         match event {
             WindowEvent::CloseRequested => {
+                self.save_recovery();
                 event_loop.exit();
             }
 
@@ -311,6 +333,7 @@ impl ApplicationHandler for RustBlendApp {
 }
 
 pub fn run(app: AndroidApp) {
+    let recovery_path = app.internal_data_path().map(|p| p.join("projects"));
     let mut builder = EventLoop::builder();
 
     builder.with_android_app(app);
@@ -327,6 +350,15 @@ pub fn run(app: AndroidApp) {
     event_loop.set_control_flow(ControlFlow::Wait);
 
     let mut application = RustBlendApp::default();
+    if let Some(path) = recovery_path {
+        match crate::project::RecoveryStore::open(path) {
+            Ok((store, state)) => {
+                application.recovery = Some(store);
+                application.suspended_workspace = state;
+            }
+            Err(error) => eprintln!("RUSTBLEND recovery disabled; existing files preserved: {error}"),
+        }
+    }
 
     if let Err(error) = event_loop.run_app(&mut application) {
         eprintln!("RUSTBLEND: Android application loop failed: {error}");

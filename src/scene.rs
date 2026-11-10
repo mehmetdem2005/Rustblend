@@ -16,6 +16,7 @@ pub enum SceneError {
     InvalidTransform,
     IdExhausted,
     ObjectNotFound,
+    InvalidSnapshot,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -157,6 +158,31 @@ pub struct Scene {
 }
 
 impl Scene {
+    pub(crate) fn next_object_id(&self) -> u64 { self.next_id }
+
+    /// Build off to the side, validating IDs and selection before exposing a scene.
+    pub(crate) fn restore(
+        records: Vec<(u64, String, Mesh, Transform)>, next_id: u64,
+        selected: Vec<u64>, active: Option<u64>,
+    ) -> Result<Self, SceneError> {
+        let mut ids = std::collections::HashSet::new();
+        let mut objects = Vec::with_capacity(records.len());
+        if next_id == 0 { return Err(SceneError::InvalidSnapshot); }
+        for (id, name, mesh, transform) in records {
+            if id == 0 || id >= next_id || !ids.insert(id) || name.trim().is_empty() {
+                return Err(SceneError::InvalidSnapshot);
+            }
+            objects.push(SceneObject { id: ObjectId(id), name, mesh, transform });
+        }
+        let mut selection = std::collections::HashSet::new();
+        if selected.iter().any(|id| !ids.contains(id) || !selection.insert(*id))
+            || active.is_some_and(|id| !selection.contains(&id))
+            || (active.is_none() && !selected.is_empty()) {
+            return Err(SceneError::InvalidSnapshot);
+        }
+        Ok(Self { objects, next_id, selected: selected.into_iter().map(ObjectId).collect(), active: active.map(ObjectId) })
+    }
+
     pub fn new() -> Self {
         Self {
             objects: Vec::new(),

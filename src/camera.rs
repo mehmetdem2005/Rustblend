@@ -56,6 +56,8 @@ impl Camera {
         })
     }
 
+    pub fn orbit_angles(&self) -> (f32, f32) { (self.yaw, self.pitch) }
+
     pub fn target(&self) -> Vec3 {
         self.target
     }

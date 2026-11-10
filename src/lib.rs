@@ -37,3 +37,5 @@ pub fn android_main(
 ) {
     android_app::run(app);
 }
+
+pub mod project;

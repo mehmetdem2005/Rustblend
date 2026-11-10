@@ -147,6 +147,7 @@ pub fn build_vertices(
     tool: ToolMode,
     edit_mode: bool,
     outliner_open: bool,
+    recovery_status: &str,
 ) -> Vec<f32> {
     let width_px = width.max(1) as f32;
     let height_px = height.max(1) as f32;
@@ -332,7 +333,8 @@ pub fn build_vertices(
         .unwrap_or_else(|| "NO OBJECT".to_string());
 
     let mut status = format!(
-        "{}  |  {} OBJECTS  |  {}  |  {} MODE",
+        "{} | {}  |  {} OBJECTS  |  {}  |  {} MODE",
+        recovery_status,
         active_name,
         scene.object_count(),
         tool.label(),
@@ -511,7 +513,7 @@ mod tests {
     fn generated_overlay_vertices_are_finite_and_not_empty() {
         let scene = scene_with_two_objects();
         let vertices = build_vertices(
-            1280, 720, &scene, ToolMode::Move, false, true
+            1280, 720, &scene, ToolMode::Move, false, true, "SAVED"
         );
 
         assert!(!vertices.is_empty());

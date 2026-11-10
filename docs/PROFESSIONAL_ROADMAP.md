@@ -291,3 +291,14 @@ değildir. Snapshot maliyeti büyük meshler için ayrıca bütçelenecektir.
 CI push üzerinde Rust testleri ve Android hedef kontrolü yapar. APK paketleme,
 yalnızca anlamlı cihaz kontrolü aşamasında manuel build_apk=true ile çalışır.
 Tek dal main kuralı devam eder. Açılış hatasının gerçek cihaz doğrulaması açıktır.
+
+## İkinci paket — sürümlü kayıt ve özel alanda kurtarma
+
+Sürüm 1 proje codec'i, doğrulanan kimlik/seçim/geometri, 8 MiB sınırı, iki
+dönüşümlü kayıt, checksum, geçici dosya + sync + rename ve bozuk son kayıtta
+önceki nesle dönüş eklendi. Android jest bitişi, suspend ve close kaydı; açılışta
+son geçerli kaydı yükleme bağlandı. UI kayıt durumunu gösterir.
+
+Dosya seçici, adlandırılmış proje yönetimi, dış yedek, asenkron kayıt, disk
+üzerinde undo geçmişi ve gerçek cihaz doğrulaması henüz yoktur.
+Ayrıntılar: [format ve kurtarma sözleşmesi](PROJECT_FORMAT.md).

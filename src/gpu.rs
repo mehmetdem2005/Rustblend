@@ -173,6 +173,7 @@ pub struct GpuRenderer {
     window: Arc<Window>,
     adapter_name: String,
     first_frame_presented: bool,
+    recovery_status: &'static str,
 }
 
 impl GpuRenderer {
@@ -531,6 +532,7 @@ impl GpuRenderer {
             tool_mode,
             edit_mode,
             outliner_open,
+            "NOT SAVED",
         );
         let ui_vertex_buffer = buffer_from_bytes(
             &device,
@@ -586,6 +588,7 @@ impl GpuRenderer {
             window,
             adapter_name,
             first_frame_presented: false,
+            recovery_status: "NOT SAVED",
         })
     }
 
@@ -613,6 +616,21 @@ impl GpuRenderer {
         self.refresh_scene_buffers()?;
         self.refresh_ui_buffer()?;
         Ok(())
+    }
+
+    pub fn recovery_snapshot(&self) -> crate::workspace::WorkspaceState {
+        crate::workspace::WorkspaceState {
+            scene: self.scene.clone(), camera: self.camera, tool: self.tool_mode,
+            edit_mode: self.edit_mode, outliner_open: self.outliner_open,
+            history: Default::default(),
+        }
+    }
+
+    pub fn set_recovery_status(&mut self, status: &'static str) {
+        self.recovery_status = status;
+        if let Err(error) = self.refresh_ui_buffer() {
+            eprintln!("RUSTBLEND: recovery status UI failed: {error}");
+        }
     }
 
     pub fn adapter_name(&self) -> &str {
@@ -672,6 +690,7 @@ impl GpuRenderer {
             self.tool_mode,
             self.edit_mode,
             self.outliner_open,
+            self.recovery_status,
         );
 
         if vertices.is_empty() || vertices.len() % 5 != 0 {
