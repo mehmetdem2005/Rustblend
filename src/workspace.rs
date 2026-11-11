@@ -11,6 +11,15 @@ pub struct WorkspaceState {
     pub outliner_open: bool,
 }
 
+impl WorkspaceState {
+    /// Disk recovery never duplicates the in-memory undo stack.
+    pub fn recovery_snapshot(&self) -> Self {
+        Self { scene: self.scene.clone(), camera: self.camera, tool: self.tool,
+            edit_mode: self.edit_mode, outliner_open: self.outliner_open,
+            history: Default::default() }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

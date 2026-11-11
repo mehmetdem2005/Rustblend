@@ -120,7 +120,7 @@ The Android viewport now includes a touch-first modeling workspace:
 - GPU scene buffers are rebuilt when scene objects or transforms change.
 - The compact toolbar, Outliner, and status strip are rendered by the native GPU renderer.
 
-The Edit Preview currently visualizes mesh topology; direct vertex/edge/face deformation, undo/redo, and project file import/export remain future work.
+The Edit Preview currently visualizes mesh topology; direct vertex/edge/face deformation and user-facing project file import/export remain future work. Undo/redo and automatic recovery are now implemented.
 
 ## Development roadmap
 
@@ -153,3 +153,9 @@ suspend/close. Startup chooses the newest valid of two committed slots. The
 footer reports save/restore failures; unreadable or future-version recovery
 blocks automatic overwrite. This does not yet provide a file-picker project
 manager or external backup, and undo history is not persisted across process death.
+
+Recovery encoding and disk writes now run on a bounded background writer. Pending
+snapshots coalesce to the latest workspace; SAVED is shown only for the latest
+completed request. Rendering is demand-driven while idle, with bounded delayed
+surface retries. Scene cloning remains on the UI thread; device performance is
+not yet measured. See [format and runtime behavior](docs/PROJECT_FORMAT.md).

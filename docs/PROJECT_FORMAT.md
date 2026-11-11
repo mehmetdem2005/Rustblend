@@ -6,8 +6,8 @@ its private directory from `AndroidApp::internal_data_path()`. No storage
 permission, network service or new account is required.
 
 A touch gesture ending (including camera navigation), cancellation, suspension,
-and a close request trigger a save. Startup reads the newest valid generation.
-The footer shows NOT SAVED, SAVED, SAVE FAILED, RESTORED or RECOVERY BLOCKED.
+and a close request queue a save on a single background writer. Startup reads the newest valid generation.
+The footer shows NOT SAVED, SAVING, SAVED, SAVE FAILED, RESTORED or RECOVERY BLOCKED.
 An interrupted gesture may lose changes since the previous completed save.
 No UI exists yet for choosing named projects, importing or sharing these files.
 Uninstall/clear app data deletes private recovery. The current temporary APK
@@ -55,8 +55,16 @@ to disk; a new process starts a fresh undo history.
 - A corrupt latest slot falls back to the valid older slot with diagnostics.
 - If both committed slots fail, recovery writes are blocked. An unsupported
   version in either slot also blocks writes, avoiding silent downgrade.
-- IO is currently synchronous at gesture boundaries, not per drag frame. A
-  bounded background writer and actual device latency tests are follow-up work.
+- Encoding and disk IO run on a single background writer with at most one
+  in-flight and one replaceable pending snapshot. New submissions replace only
+  pending work; the current write completes before the latest pending write.
+- Completion revisions prevent an older save from marking newer work SAVED.
+  A native event wakes the idle UI when a write finishes; there is no polling.
+- CPU scene snapshot cloning still happens on the UI thread at gesture boundaries.
+  Snapshot/delta optimization and actual device latency measurements remain open.
+- Normal application teardown drains pending work and joins the writer. Suspend
+  queues a snapshot without waiting for disk IO. Android can kill a process before
+  a pending write finishes; only the last completed generation is recoverable.
 - Android private-filesystem rename behavior is targeted; this is not yet a
   Storage Access Framework save implementation.
 
@@ -71,3 +79,12 @@ failed saves, future versions, and preservation of existing recovery files.
 Device tests still required: modify and reopen after process termination;
 repeat with an empty scene; suspend/resume; inspect SAVE FAILED behavior under
 storage pressure. These require a later meaningful APK milestone.
+
+## Demand-driven rendering
+
+The Android loop waits when idle. Input, resize, visibility restoration and save
+status changes request frames. Timeout/outdated/lost surfaces retry at 100 ms
+intervals, at most three times until a new user/window event. Occluded windows
+and validation failures do not spin. Resuming or interacting allows recovery to
+be retried. These are code-level policies; battery, thermal and Mali device
+behavior still need device measurement.

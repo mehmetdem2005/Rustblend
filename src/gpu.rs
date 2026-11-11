@@ -135,6 +135,8 @@ const LINE_ATTRIBUTES: [wgpu::VertexAttribute; 2] = [
     },
 ];
 
+pub enum FrameResult { Presented, Retry, Unavailable }
+
 pub struct GpuRenderer {
     instance: wgpu::Instance,
     surface: wgpu::Surface<'static>,
@@ -627,7 +629,9 @@ impl GpuRenderer {
     }
 
     pub fn set_recovery_status(&mut self, status: &'static str) {
+        if self.recovery_status == status { return; }
         self.recovery_status = status;
+        self.window.request_redraw();
         if let Err(error) = self.refresh_ui_buffer() {
             eprintln!("RUSTBLEND: recovery status UI failed: {error}");
         }
@@ -998,15 +1002,13 @@ impl GpuRenderer {
         self.window.request_redraw();
     }
 
-    pub fn render(&mut self) {
+    pub fn render(&mut self) -> FrameResult {
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
 
-            wgpu::CurrentSurfaceTexture::Timeout
-            | wgpu::CurrentSurfaceTexture::Occluded => {
-                return;
-            }
+            wgpu::CurrentSurfaceTexture::Timeout => return FrameResult::Retry,
+            wgpu::CurrentSurfaceTexture::Occluded => return FrameResult::Unavailable,
 
             wgpu::CurrentSurfaceTexture::Outdated => {
                 self.surface.configure(
@@ -1014,8 +1016,7 @@ impl GpuRenderer {
                     &self.surface_config,
                 );
 
-                self.window.request_redraw();
-                return;
+                return FrameResult::Retry;
             }
 
             wgpu::CurrentSurfaceTexture::Lost => {
@@ -1028,7 +1029,6 @@ impl GpuRenderer {
                             &self.device,
                             &self.surface_config,
                         );
-                        self.window.request_redraw();
                     }
 
                     Err(error) => {
@@ -1038,12 +1038,12 @@ impl GpuRenderer {
                     }
                 }
 
-                return;
+                return FrameResult::Retry;
             }
 
             wgpu::CurrentSurfaceTexture::Validation => {
                 eprintln!("RUSTBLEND GPU: surface validation failed.");
-                return;
+                return FrameResult::Unavailable;
             }
         };
 
@@ -1145,6 +1145,7 @@ impl GpuRenderer {
             eprintln!("RUSTBLEND GPU: first 3D viewport frame presented.");
             self.first_frame_presented = true;
         }
+        FrameResult::Presented
     }
 }
 

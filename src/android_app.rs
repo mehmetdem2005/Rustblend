@@ -1,7 +1,13 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 
-use crate::gpu::GpuRenderer;
+use crate::gpu::{GpuRenderer, FrameResult};
+use crate::recovery_worker::{RecoveryWorker, SaveStatus};
+use crate::frame_retry::FrameRetry;
+use std::time::Instant;
+
+#[derive(Debug)]
+enum AppEvent { RecoveryFinished }
 
 use winit::{
     application::ApplicationHandler,
@@ -34,20 +40,37 @@ struct RustBlendApp {
     renderer: Option<GpuRenderer>,
     touches: HashMap<u64, TouchState>,
     suspended_workspace: Option<crate::workspace::WorkspaceState>,
-    recovery: Option<crate::project::RecoveryStore>,
+    recovery: Option<RecoveryWorker>,
+    frame_retry: FrameRetry,
+    occluded: bool,
 }
 
 impl RustBlendApp {
     fn save_recovery(&mut self) {
-        let Some(store) = self.recovery.as_mut() else { return; };
-        let result = if let Some(renderer) = self.renderer.as_ref() {
-            store.save(&renderer.recovery_snapshot())
+        let Some(worker) = self.recovery.as_mut() else { return; };
+        let snapshot = if let Some(renderer) = self.renderer.as_ref() {
+            renderer.recovery_snapshot()
         } else if let Some(state) = self.suspended_workspace.as_ref() {
-            store.save(state)
+            state.recovery_snapshot()
         } else { return; };
-        let status = match result {
-            Ok(()) => "SAVED",
-            Err(error) => { eprintln!("RUSTBLEND recovery save failed: {error}"); "SAVE FAILED" }
+        if let Err(error) = worker.submit(snapshot) {
+            eprintln!("RUSTBLEND recovery submit failed: {error}");
+            if let Some(renderer) = self.renderer.as_mut() { renderer.set_recovery_status("SAVE FAILED"); }
+            return;
+        }
+        if let Some(renderer) = self.renderer.as_mut() { renderer.set_recovery_status("SAVING"); }
+    }
+
+    fn refresh_recovery_status(&mut self) {
+        let status = match self.recovery.as_ref().map(|worker| worker.status()) {
+            None => "RECOVERY BLOCKED",
+            Some(_) if !self.touches.is_empty() => "NOT SAVED",
+            Some(SaveStatus::Idle) => return,
+            Some(SaveStatus::Saving) => "SAVING",
+            Some(SaveStatus::Saved) => "SAVED",
+            Some(SaveStatus::Failed(error)) => {
+                eprintln!("RUSTBLEND recovery save failed: {error}"); "SAVE FAILED"
+            }
         };
         if let Some(renderer) = self.renderer.as_mut() { renderer.set_recovery_status(status); }
     }
@@ -60,6 +83,9 @@ impl RustBlendApp {
     ) {
         match phase {
             TouchPhase::Started => {
+                if self.recovery.is_some() {
+                    if let Some(renderer) = self.renderer.as_mut() { renderer.set_recovery_status("NOT SAVED"); }
+                }
                 if !self.touches.is_empty() {
                     if let Some(renderer) = self.renderer.as_mut() {
                         renderer.finish_drag(false);
@@ -182,7 +208,23 @@ fn distance(a: (f64, f64), b: (f64, f64)) -> f64 {
     (dx * dx + dy * dy).sqrt()
 }
 
-impl ApplicationHandler for RustBlendApp {
+impl ApplicationHandler<AppEvent> for RustBlendApp {
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: AppEvent) {
+        self.refresh_recovery_status();
+    }
+
+    fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
+        if self.renderer.is_none() || self.occluded {
+            self.frame_retry.clear();
+        } else if self.frame_retry.take_due(Instant::now()) {
+            if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+        }
+        event_loop.set_control_flow(match self.frame_retry.deadline() {
+            Some(deadline) => ControlFlow::WaitUntil(deadline),
+            None => ControlFlow::Wait,
+        });
+    }
+
     fn resumed(&mut self, event_loop: &ActiveEventLoop) {
         if self.window.is_some() {
             return;
@@ -254,7 +296,10 @@ impl ApplicationHandler for RustBlendApp {
                 self.suspended_workspace = None;
                 self.touches.clear();
 
-                event_loop.set_control_flow(ControlFlow::Poll);
+                self.occluded = false;
+                self.frame_retry.reset();
+                self.refresh_recovery_status();
+                event_loop.set_control_flow(ControlFlow::Wait);
                 window.request_redraw();
             }
 
@@ -279,6 +324,7 @@ impl ApplicationHandler for RustBlendApp {
             self.suspended_workspace = Some(renderer.into_workspace());
         }
         self.save_recovery();
+        self.frame_retry.clear();
         self.window = None;
         self.touches.clear();
     }
@@ -304,12 +350,15 @@ impl ApplicationHandler for RustBlendApp {
             }
 
             WindowEvent::Resized(size) => {
+                self.occluded = size.width == 0 || size.height == 0;
+                self.frame_retry.reset();
                 if let Some(renderer) = self.renderer.as_mut() {
                     renderer.resize(size);
                 }
             }
 
             WindowEvent::Touch(touch) => {
+                self.frame_retry.reset();
                 self.handle_touch(
                     touch.phase,
                     touch.id,
@@ -317,12 +366,21 @@ impl ApplicationHandler for RustBlendApp {
                 );
             }
 
-            WindowEvent::RedrawRequested => {
-                if let Some(renderer) = self.renderer.as_mut() {
-                    renderer.render();
+            WindowEvent::Occluded(occluded) => {
+                self.occluded = occluded;
+                self.frame_retry.reset();
+                if !occluded {
+                    if let Some(window) = self.window.as_ref() { window.request_redraw(); }
+                }
+            }
 
-                    if let Some(window) = self.window.as_ref() {
-                        window.request_redraw();
+            WindowEvent::RedrawRequested => {
+                if self.occluded { return; }
+                if let Some(renderer) = self.renderer.as_mut() {
+                    match renderer.render() {
+                        FrameResult::Presented => self.frame_retry.reset(),
+                        FrameResult::Retry => self.frame_retry.failed(Instant::now()),
+                        FrameResult::Unavailable => self.frame_retry.clear(),
                     }
                 }
             }
@@ -334,7 +392,7 @@ impl ApplicationHandler for RustBlendApp {
 
 pub fn run(app: AndroidApp) {
     let recovery_path = app.internal_data_path().map(|p| p.join("projects"));
-    let mut builder = EventLoop::builder();
+    let mut builder = EventLoop::<AppEvent>::with_user_event();
 
     builder.with_android_app(app);
 
@@ -353,8 +411,12 @@ pub fn run(app: AndroidApp) {
     if let Some(path) = recovery_path {
         match crate::project::RecoveryStore::open(path) {
             Ok((store, state)) => {
-                application.recovery = Some(store);
                 application.suspended_workspace = state;
+                let proxy = event_loop.create_proxy();
+                match RecoveryWorker::new(store, move || { let _ = proxy.send_event(AppEvent::RecoveryFinished); }) {
+                    Ok(worker) => application.recovery = Some(worker),
+                    Err(error) => eprintln!("RUSTBLEND recovery worker unavailable: {error}"),
+                }
             }
             Err(error) => eprintln!("RUSTBLEND recovery disabled; existing files preserved: {error}"),
         }

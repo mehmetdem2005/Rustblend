@@ -302,3 +302,20 @@ son geçerli kaydı yükleme bağlandı. UI kayıt durumunu gösterir.
 Dosya seçici, adlandırılmış proje yönetimi, dış yedek, asenkron kayıt, disk
 üzerinde undo geçmişi ve gerçek cihaz doğrulaması henüz yoktur.
 Ayrıntılar: [format ve kurtarma sözleşmesi](PROJECT_FORMAT.md).
+
+## Üçüncü paket — arka plan kaydı ve ihtiyaç halinde çizim
+
+Tek yazıcı thread'i; en fazla bir çalışan ve bir bekleyen sahne; bekleyen
+kayıtlarda en güncel durumun korunması; sıra numarasıyla doğru SAVING/SAVED
+gösterimi; tamamlanınca native event ile uyanma eklendi. Suspend kaydı sıraya
+alır, disk beklemez; süreç hemen öldürülürse son tamamlanan kayıt kurtarılır.
+Normal kapanış bekleyen kaydı tamamlar. CPU sahne kopyası hâlâ UI thread'indedir.
+
+Boşta sürekli redraw ve Poll kaldırıldı. Yüzey timeout/outdated/lost durumları
+100 ms arayla en fazla üç kez denenir. Gizli pencere çizilmez; yeni etkileşim
+veya pencere olayı yeniden denemeyi açar. Pil/ısı sonuçları henüz ölçülmedi.
+
+Testler: yavaş yazıcı sırasında yeni istek, bekleyenlerin birleştirilmesi, eski
+sonucun yeni isteği kaydedildi göstermemesi, hata sonrası tekrar kayıt, panic
+raporu, kapanışın son kaydı yazması ve dosyadan tekrar açılması; frame retry
+bütçesi ve iptali. APK bu pakette üretilmez.
