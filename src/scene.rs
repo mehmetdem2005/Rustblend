@@ -183,6 +183,12 @@ impl Scene {
         Ok(Self { objects, next_id, selected: selected.into_iter().map(ObjectId).collect(), active: active.map(ObjectId) })
     }
 
+    pub fn reset_active_transform(&mut self) -> Result<(), SceneError> {
+        let id = self.active.ok_or(SceneError::ObjectNotFound)?;
+        self.get_mut(id).ok_or(SceneError::ObjectNotFound)?.set_transform(Transform::default());
+        Ok(())
+    }
+
     pub fn new() -> Self {
         Self {
             objects: Vec::new(),
@@ -929,4 +935,19 @@ mod modeling_operation_tests {
             Vec3::new(1.0, 1.0, 1.0)
         );
     }
+}
+
+#[cfg(test)]
+mod reset_tests {
+ use super::*;
+ #[test] fn reset_can_be_undone_and_preserves_other_objects(){
+  let mut scene=Scene::new();let a=scene.add_object("A",Mesh::cube(1.0).unwrap()).unwrap();
+  let b=scene.add_object("B",Mesh::cube(1.0).unwrap()).unwrap();scene.select(a).unwrap();
+  scene.translate_active(Vec3::new(3.0,2.0,1.0)).unwrap();let before=scene.clone();
+  let mut history=crate::history::History::default();history.begin(&scene);
+  scene.reset_active_transform().unwrap();history.commit(&scene);
+  assert_eq!(*scene.get(a).unwrap().transform(),Transform::default());
+  assert_eq!(scene.get(b),before.get(b));history.undo(&mut scene);assert_eq!(scene,before);
+ }
+ #[test] fn reset_empty_scene_is_safe(){assert_eq!(Scene::new().reset_active_transform(),Err(SceneError::ObjectNotFound));}
 }

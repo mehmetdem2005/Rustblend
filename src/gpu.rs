@@ -836,7 +836,7 @@ impl GpuRenderer {
             return false;
         };
 
-        let edits_scene = matches!(action, UiAction::AddCube | UiAction::Duplicate | UiAction::Delete);
+        let edits_scene = matches!(action, UiAction::AddCube | UiAction::Duplicate | UiAction::Delete | UiAction::ResetTransform);
         if edits_scene { self.history.begin(&self.scene); }
         match action {
             UiAction::Projects => { self.project_action = Some(crate::project_ui::ProjectAction::Toggle); }
@@ -859,6 +859,11 @@ impl GpuRenderer {
                 if let Err(error) = self.duplicate_active() {
                     eprintln!("RUSTBLEND: {error}");
                 }
+                self.refresh_workspace(true);
+            }
+
+            UiAction::ResetTransform => {
+                let _ = self.scene.reset_active_transform();
                 self.refresh_workspace(true);
             }
 

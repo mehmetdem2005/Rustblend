@@ -1,7 +1,4 @@
-use crate::{
-    geometry::Mesh,
-    scene::Scene,
-};
+use crate::scene::Scene;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ToolMode {
@@ -10,7 +7,6 @@ pub enum ToolMode {
     Rotate,
     Scale,
 }
-
 impl ToolMode {
     pub fn label(self) -> &'static str {
         match self {
@@ -21,7 +17,6 @@ impl ToolMode {
         }
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiAction {
     Undo,
@@ -30,6 +25,7 @@ pub enum UiAction {
     AddCube,
     Duplicate,
     Delete,
+    ResetTransform,
     SetTool(ToolMode),
     ToggleEdit,
     ToggleOutliner,
@@ -37,51 +33,66 @@ pub enum UiAction {
     Ignore,
 }
 
-const TOOLBAR_HEIGHT: f32 = 68.0;
-const FOOTER_HEIGHT: f32 = 48.0;
-const BUTTON_TOP: f32 = 8.0;
-const BUTTON_HEIGHT: f32 = 52.0;
-const BUTTON_GAP: f32 = 4.0;
-const PANEL_TOP: f32 = 76.0;
-const PANEL_ROW_HEIGHT: f32 = 30.0;
-
-fn panel_width(width: f32) -> f32 {
-    (width * 0.38).min(220.0).max(128.0).min((width - 12.0).max(0.0))
+// All drawing and touch routing share logical coordinates. Scale with the surface,
+// so a high-density phone does not get tiny fixed-pixel touch targets.
+struct Layout {
+    w: f32,
+    h: f32,
+    scale: f32,
+    side: f32,
+    split: f32,
 }
-
-fn button_width(width: f32) -> f32 {
-    ((width - 16.0 - BUTTON_GAP * 7.0) / 8.0).max(28.0)
-}
-
-fn button_x(index: usize, width: f32) -> f32 {
-    8.0 + index as f32 * (button_width(width) + BUTTON_GAP)
-}
-
-pub fn is_ui_position(
-    width: u32,
-    height: u32,
-    x: f32,
-    y: f32,
-    outliner_open: bool,
-) -> bool {
-    let width = width.max(1) as f32;
-    let height = height.max(1) as f32;
-
-    if y <= TOOLBAR_HEIGHT || y >= height - FOOTER_HEIGHT {
-        return true;
+impl Layout {
+    fn new(width: u32, height: u32) -> Self {
+        let scale =
+            ((width.max(1) as f32 / 960.0).min(height.max(1) as f32 / 540.0)).clamp(0.5, 3.0);
+        let w = width.max(1) as f32 / scale;
+        let h = height.max(1) as f32 / scale;
+        let side = (w * 0.27).clamp(180.0, 260.0).min((w - 160.0).max(0.0));
+        Self {
+            w,
+            h,
+            scale,
+            side,
+            split: (h * 0.51).max(220.0),
+        }
     }
-
-    if outliner_open
-        && x >= width - panel_width(width) - 8.0
-        && y >= PANEL_TOP
-        && y < height - FOOTER_HEIGHT
-    {
-        return true;
+    fn rows(&self) -> usize {
+        ((self.split - 132.0) / 32.0).floor().max(1.0) as usize
     }
-
-    false
+    fn first(&self, scene: &Scene) -> usize {
+        let active = scene
+            .objects()
+            .iter()
+            .position(|o| Some(o.id()) == scene.active_object_id())
+            .unwrap_or(0);
+        active / self.rows() * self.rows()
+    }
+    fn inside(&self, x: f32, y: f32) -> bool {
+        x.is_finite() && y.is_finite() && x >= 0.0 && y >= 0.0 && x < self.w && y < self.h
+    }
 }
-
+const BG: [f32; 3] = [0.055, 0.058, 0.063];
+const PANEL: [f32; 3] = [0.085, 0.089, 0.095];
+const BUTTON: [f32; 3] = [0.13, 0.135, 0.145];
+const ORANGE: [f32; 3] = [0.95, 0.36, 0.035];
+const WHITE: [f32; 3] = [0.9, 0.91, 0.93];
+const MUTED: [f32; 3] = [0.57, 0.60, 0.64];
+const RAIL: [(&str, UiAction); 7] = [
+    ("ORBIT", UiAction::SetTool(ToolMode::Orbit)),
+    ("MOVE", UiAction::SetTool(ToolMode::Move)),
+    ("ROTATE", UiAction::SetTool(ToolMode::Rotate)),
+    ("SCALE", UiAction::SetTool(ToolMode::Scale)),
+    ("ADD", UiAction::AddCube),
+    ("COPY", UiAction::Duplicate),
+    ("DELETE", UiAction::Delete),
+];
+pub fn is_ui_position(width: u32, height: u32, x: f32, y: f32, outliner_open: bool) -> bool {
+    let l = Layout::new(width, height);
+    let (x, y) = (x / l.scale, y / l.scale);
+    l.inside(x, y)
+        && (y < 88.0 || y >= l.h - 44.0 || x < 68.0 || (outliner_open && x >= l.w - l.side))
+}
 pub fn hit_test(
     width: u32,
     height: u32,
@@ -90,55 +101,74 @@ pub fn hit_test(
     scene: &Scene,
     outliner_open: bool,
 ) -> Option<UiAction> {
-    let width_px = width.max(1) as f32;
-    let height_px = height.max(1) as f32;
-
-    if y <= TOOLBAR_HEIGHT {
-        let labels = [
-            UiAction::AddCube,
-            UiAction::Duplicate,
-            UiAction::Delete,
-            UiAction::SetTool(ToolMode::Move),
-            UiAction::SetTool(ToolMode::Rotate),
-            UiAction::SetTool(ToolMode::Scale),
-            UiAction::ToggleEdit,
-            UiAction::ToggleOutliner,
-        ];
-
-        let button_width = button_width(width_px);
-        for (index, action) in labels.into_iter().enumerate() {
-            let left = button_x(index, width_px);
-            if x >= left && x <= left + button_width
-                && y >= BUTTON_TOP && y <= BUTTON_TOP + BUTTON_HEIGHT
-            {
-                return Some(action);
-            }
+    let l = Layout::new(width, height);
+    let (x, y) = (x / l.scale, y / l.scale);
+    if !l.inside(x, y) {
+        return None;
+    }
+    if y < 44.0 {
+        return Some(if x >= l.w - 92.0 {
+            UiAction::Projects
+        } else {
+            UiAction::Ignore
+        });
+    }
+    if y < 88.0 {
+        return Some(if x < 144.0 {
+            UiAction::ToggleEdit
+        } else if x >= l.w - 92.0 {
+            UiAction::ToggleOutliner
+        } else {
+            UiAction::Ignore
+        });
+    }
+    if y >= l.h - 44.0 {
+        return Some(if x < 80.0 {
+            UiAction::Undo
+        } else if x < 160.0 {
+            UiAction::Redo
+        } else {
+            UiAction::Ignore
+        });
+    }
+    if x < 68.0 {
+        let i = ((y - 92.0) / 52.0).floor() as usize;
+        return Some(
+            if y >= 92.0 && i < RAIL.len() && y < 92.0 + i as f32 * 52.0 + 48.0 {
+                RAIL[i].1
+            } else {
+                UiAction::Ignore
+            },
+        );
+    }
+    if outliner_open && x >= l.w - l.side {
+        if y >= 88.0 && y < 132.0 {
+            let first = l.first(scene);
+            let rows = l.rows();
+            let index = if x < l.w - l.side / 2.0 {
+                first.saturating_sub(rows)
+            } else {
+                first + rows
+            };
+            return Some(if index < scene.object_count() {
+                UiAction::SelectObject(index)
+            } else {
+                UiAction::Ignore
+            });
         }
-
+        if y >= 132.0 && y < 132.0 + l.rows() as f32 * 32.0 {
+            let i = l.first(scene) + ((y - 132.0) / 32.0).floor() as usize;
+            return Some(if i < scene.object_count() {
+                UiAction::SelectObject(i)
+            } else {
+                UiAction::Ignore
+            });
+        }
+        if y >= l.split + 170.0 && y < l.split + 210.0 && y < l.h - 44.0 {
+            return Some(UiAction::ResetTransform);
+        }
         return Some(UiAction::Ignore);
     }
-
-    if y >= height_px - FOOTER_HEIGHT {
-        return Some(if x < 72.0 { UiAction::Undo }
-            else if x < 144.0 { UiAction::Redo }
-            else if x < 256.0 { UiAction::Projects }
-            else { UiAction::Ignore });
-    }
-
-    if outliner_open {
-        let left = width_px - panel_width(width_px) - 8.0;
-        if x >= left && y >= PANEL_TOP && y < height_px - FOOTER_HEIGHT {
-            let row_top = PANEL_TOP + 38.0;
-            if y >= row_top {
-                let index = ((y - row_top) / PANEL_ROW_HEIGHT).floor() as usize;
-                if index < scene.object_count() {
-                    return Some(UiAction::SelectObject(index));
-                }
-            }
-            return Some(UiAction::Ignore);
-        }
-    }
-
     None
 }
 
@@ -151,216 +181,214 @@ pub fn build_vertices(
     outliner_open: bool,
     recovery_status: &str,
 ) -> Vec<f32> {
-    let width_px = width.max(1) as f32;
-    let height_px = height.max(1) as f32;
-    let mut vertices = Vec::new();
-
-    rect(
-        &mut vertices,
-        width_px,
-        height_px,
-        0.0,
-        0.0,
-        width_px,
-        TOOLBAR_HEIGHT,
-        [0.035, 0.045, 0.070],
-    );
-
-    let actions = [
-        ("ADD", [0.12, 0.34, 0.48]),
-        ("DUP", [0.13, 0.18, 0.27]),
-        ("DEL", [0.42, 0.13, 0.16]),
-        ("MOV", [0.17, 0.24, 0.34]),
-        ("ROT", [0.17, 0.24, 0.34]),
-        ("SCL", [0.17, 0.24, 0.34]),
-        ("EDIT", [0.24, 0.18, 0.36]),
-        ("LIST", [0.13, 0.18, 0.27]),
-    ];
-
-    let active_tool = match tool {
-        ToolMode::Orbit => None,
-        ToolMode::Move => Some(3),
-        ToolMode::Rotate => Some(4),
-        ToolMode::Scale => Some(5),
-    };
-
-    let bw = button_width(width_px);
-    for (index, (label, base_color)) in actions.into_iter().enumerate() {
-        let x = button_x(index, width_px);
-        let mut color = base_color;
-
-        if Some(index) == active_tool {
-            color = [0.72, 0.34, 0.10];
-        } else if index == 6 && edit_mode {
-            color = [0.50, 0.27, 0.72];
-        } else if index == 7 && outliner_open {
-            color = [0.23, 0.34, 0.50];
-        }
-
-        rect(
-            &mut vertices,
-            width_px,
-            height_px,
-            x,
-            BUTTON_TOP,
-            bw,
-            BUTTON_HEIGHT,
-            color,
-        );
-
-        let scale = 1.05_f32;
-        let text_width = label.len() as f32 * 4.0 * scale - scale;
-        let text_x = x + (bw - text_width) * 0.5;
-        text(
-            &mut vertices,
-            width_px,
-            height_px,
-            label,
-            text_x,
-            BUTTON_TOP + 34.0,
-            scale,
-            [0.94, 0.96, 1.0],
-        );
+    let l = Layout::new(width, height);
+    let (w, h) = (l.w, l.h);
+    let mut v = Vec::new();
+    rect(&mut v, w, h, 0.0, 0.0, w, 88.0, BG);
+    text(&mut v, w, h, "RUST", 16.0, 29.0, 3.0, WHITE);
+    text(&mut v, w, h, "BLEND", 64.0, 29.0, 3.0, ORANGE);
+    if w > 600.0 {
+        text(&mut v, w, h, "MODELING WORKSPACE", 170.0, 27.0, 1.8, MUTED);
     }
-
-    if outliner_open {
-        let panel_w = panel_width(width_px);
-        let panel_x = width_px - panel_w - 8.0;
-        let panel_h = (height_px - PANEL_TOP - FOOTER_HEIGHT).max(38.0);
-
-        rect(
-            &mut vertices,
-            width_px,
-            height_px,
-            panel_x,
-            PANEL_TOP,
-            panel_w,
-            panel_h,
-            [0.055, 0.070, 0.100],
-        );
-
+    button(&mut v, &l, w - 92.0, 4.0, 88.0, 36.0, "PROJECTS", false);
+    button(
+        &mut v,
+        &l,
+        8.0,
+        48.0,
+        132.0,
+        36.0,
+        if edit_mode {
+            "MESH PREVIEW"
+        } else {
+            "OBJECT MODE"
+        },
+        edit_mode,
+    );
+    text(&mut v, w, h, "PERSPECTIVE", 156.0, 71.0, 1.6, MUTED);
+    button(
+        &mut v,
+        &l,
+        w - 92.0,
+        48.0,
+        88.0,
+        36.0,
+        "PANELS",
+        outliner_open,
+    );
+    rect(&mut v, w, h, 0.0, 88.0, 68.0, h - 132.0, BG);
+    for (i, (label, action)) in RAIL.iter().enumerate() {
+        let y = 92.0 + i as f32 * 52.0;
+        if y + 48.0 <= h - 44.0 {
+            button(
+                &mut v,
+                &l,
+                4.0,
+                y,
+                60.0,
+                48.0,
+                label,
+                *action == UiAction::SetTool(tool),
+            );
+        }
+    }
+    let viewport_right = if outliner_open { w - l.side } else { w };
+    if viewport_right > 300.0 {
         text(
-            &mut vertices,
-            width_px,
-            height_px,
-            "OUTLINER",
-            panel_x + 10.0,
-            PANEL_TOP + 22.0,
-            1.25,
-            [0.65, 0.73, 0.85],
+            &mut v,
+            w,
+            h,
+            &format!("{} OBJECTS", scene.object_count()),
+            82.0,
+            110.0,
+            1.6,
+            MUTED,
         );
-
-        rect(
-            &mut vertices,
-            width_px,
-            height_px,
-            panel_x + 8.0,
-            PANEL_TOP + 29.0,
-            panel_w - 16.0,
-            1.0,
-            [0.20, 0.25, 0.33],
+        text(&mut v, w, h, tool.label(), 82.0, 130.0, 1.6, ORANGE);
+    }
+    if outliner_open {
+        let x = w - l.side;
+        rect(&mut v, w, h, x, 88.0, l.side, h - 132.0, PANEL);
+        button(
+            &mut v,
+            &l,
+            x + 4.0,
+            92.0,
+            l.side / 2.0 - 8.0,
+            32.0,
+            "PREV",
+            false,
         );
-
-        let available_rows = ((panel_h - 38.0) / PANEL_ROW_HEIGHT).floor().max(0.0) as usize;
-        for (index, object) in scene.objects().iter().take(available_rows).enumerate() {
-            let row_y = PANEL_TOP + 38.0 + index as f32 * PANEL_ROW_HEIGHT;
-            let active = scene.active_object_id() == Some(object.id());
-
-            if active {
-                rect(
-                    &mut vertices,
-                    width_px,
-                    height_px,
-                    panel_x + 5.0,
-                    row_y + 2.0,
-                    panel_w - 10.0,
-                    PANEL_ROW_HEIGHT - 4.0,
-                    [0.34, 0.20, 0.10],
+        button(
+            &mut v,
+            &l,
+            x + l.side / 2.0,
+            92.0,
+            l.side / 2.0 - 4.0,
+            32.0,
+            "NEXT",
+            false,
+        );
+        for (i, o) in scene
+            .objects()
+            .iter()
+            .enumerate()
+            .skip(l.first(scene))
+            .take(l.rows())
+        {
+            let y = 132.0 + (i - l.first(scene)) as f32 * 32.0;
+            let active = Some(o.id()) == scene.active_object_id();
+            let name: String = o
+                .name()
+                .chars()
+                .take(((l.side - 22.0) / 6.4) as usize)
+                .collect();
+            button(&mut v, &l, x + 4.0, y, l.side - 8.0, 28.0, &name, active);
+        }
+        if scene.is_empty() {
+            text(&mut v, w, h, "EMPTY SCENE", x + 12.0, 154.0, 1.8, MUTED);
+        }
+        if l.split + 210.0 <= h - 44.0 {
+            rect(&mut v, w, h, x, l.split, l.side, 2.0, BUTTON);
+            text(
+                &mut v,
+                w,
+                h,
+                "TRANSFORM",
+                x + 12.0,
+                l.split + 26.0,
+                2.0,
+                WHITE,
+            );
+            if let Some(o) = scene.active_object() {
+                let t = o.transform();
+                let p = t.position();
+                let s = t.scale();
+                let q = t.rotation();
+                for (i, line) in [
+                    format!("X {:.2} Y {:.2}", p.x, p.y),
+                    format!("Z {:.2}", p.z),
+                    format!("S {:.2} {:.2} {:.2}", s.x, s.y, s.z),
+                    format!("Q {:.2} {:.2}", q.x, q.y),
+                    format!("  {:.2} {:.2}", q.z, q.w),
+                ]
+                .iter()
+                .enumerate()
+                {
+                    let clipped: String = line
+                        .chars()
+                        .take(((l.side - 24.0) / 6.4) as usize)
+                        .collect();
+                    text(
+                        &mut v,
+                        w,
+                        h,
+                        &clipped,
+                        x + 12.0,
+                        l.split + 52.0 + i as f32 * 22.0,
+                        1.6,
+                        MUTED,
+                    );
+                }
+                button(
+                    &mut v,
+                    &l,
+                    x + 8.0,
+                    l.split + 170.0,
+                    l.side - 16.0,
+                    40.0,
+                    "RESET TRANSFORM",
+                    false,
+                );
+            } else {
+                text(
+                    &mut v,
+                    w,
+                    h,
+                    "NO SELECTION",
+                    x + 12.0,
+                    l.split + 54.0,
+                    1.8,
+                    MUTED,
                 );
             }
-
-            let mut name = object.name().to_uppercase();
-            if name.chars().count() > 17 {
-                name = name.chars().take(17).collect();
-            }
-
-            text(
-                &mut vertices,
-                width_px,
-                height_px,
-                &name,
-                panel_x + 12.0,
-                row_y + 19.0,
-                1.0,
-                if active {
-                    [1.0, 0.82, 0.58]
-                } else {
-                    [0.72, 0.78, 0.87]
-                },
-            );
-        }
-
-        if scene.is_empty() {
-            text(
-                &mut vertices,
-                width_px,
-                height_px,
-                "EMPTY SCENE",
-                panel_x + 10.0,
-                PANEL_TOP + 60.0,
-                1.0,
-                [0.55, 0.61, 0.70],
-            );
         }
     }
-
-    rect(
-        &mut vertices,
-        width_px,
-        height_px,
-        0.0,
-        height_px - FOOTER_HEIGHT,
-        width_px,
-        FOOTER_HEIGHT,
-        [0.025, 0.033, 0.052],
-    );
-
-    for (label, x) in [("UNDO", 12.0), ("REDO", 84.0), ("PROJECTS", 152.0)] {
-        text(&mut vertices, width_px, height_px, label, x,
-            height_px - 20.0, 2.0, [0.94, 0.96, 1.0]);
-    }
-
-    let active_name = scene.active_object()
-        .map(|object| object.name().to_uppercase())
-        .unwrap_or_else(|| "NO OBJECT".to_string());
-
-    let mut status = format!(
-        "{} | {}  |  {} OBJECTS  |  {}  |  {} MODE",
-        recovery_status,
-        active_name,
-        scene.object_count(),
-        tool.label(),
-        if edit_mode { "EDIT" } else { "OBJECT" },
-    );
-
-    if status.chars().count() > 100 {
-        status = status.chars().take(100).collect();
-    }
-
-    text(
-        &mut vertices,
-        width_px,
-        height_px,
-        &status,
-        268.0,
-        height_px - 9.0,
-        1.0,
-        [0.68, 0.75, 0.86],
-    );
-
-    vertices
+    rect(&mut v, w, h, 0.0, h - 44.0, w, 44.0, BG);
+    button(&mut v, &l, 4.0, h - 40.0, 72.0, 36.0, "UNDO", false);
+    button(&mut v, &l, 84.0, h - 40.0, 72.0, 36.0, "REDO", false);
+    let max = ((w - 178.0) / 6.4).max(0.0) as usize;
+    let status: String = format!("{} | DRAG {} | PINCH ZOOM", recovery_status, tool.label())
+        .chars()
+        .take(max)
+        .collect();
+    text(&mut v, w, h, &status, 172.0, h - 17.0, 1.6, MUTED);
+    v
 }
-
+fn button(v: &mut Vec<f32>, l: &Layout, x: f32, y: f32, w: f32, h: f32, label: &str, active: bool) {
+    rect(
+        v,
+        l.w,
+        l.h,
+        x,
+        y,
+        w,
+        h,
+        if active { ORANGE } else { BUTTON },
+    );
+    let scale = 1.6;
+    let tw = label.chars().count() as f32 * 4.0 * scale;
+    text(
+        v,
+        l.w,
+        l.h,
+        label,
+        x + (w - tw).max(8.0) / 2.0,
+        y + h / 2.0 + 4.0,
+        scale,
+        WHITE,
+    );
+}
 pub(crate) fn rect(
     output: &mut Vec<f32>,
     width: f32,
@@ -384,18 +412,9 @@ pub(crate) fn rect(
     triangle(output, [x0, y0], [x1, y1], [x0, y1], color);
 }
 
-fn triangle(
-    output: &mut Vec<f32>,
-    a: [f32; 2],
-    b: [f32; 2],
-    c: [f32; 2],
-    color: [f32; 3],
-) {
+fn triangle(output: &mut Vec<f32>, a: [f32; 2], b: [f32; 2], c: [f32; 2], color: [f32; 3]) {
     for point in [a, b, c] {
-        output.extend_from_slice(&[
-            point[0], point[1],
-            color[0], color[1], color[2],
-        ]);
+        output.extend_from_slice(&[point[0], point[1], color[0], color[1], color[2]]);
     }
 }
 
@@ -488,44 +507,76 @@ fn glyph(character: char) -> [u8; 5] {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    fn scene_with_two_objects() -> Scene {
-        let mut scene = Scene::new();
-        let first = scene.add_object("Cube", Mesh::cube(2.0).unwrap()).unwrap();
-        scene.add_object("Cube Copy", Mesh::cube(1.0).unwrap()).unwrap();
-        scene.select(first).unwrap();
-        scene
+    fn scene(n: usize) -> Scene {
+        let mut s = Scene::new();
+        for _ in 0..n {
+            let id = s
+                .add_object("Cube", crate::Mesh::cube(2.0).unwrap())
+                .unwrap();
+            s.select(id).unwrap();
+        }
+        s
     }
-
     #[test]
-    fn toolbar_buttons_have_individual_hit_targets() {
-        let scene = scene_with_two_objects();
-        let action = hit_test(1280, 720, 18.0, 30.0, &scene, true);
-        assert_eq!(action, Some(UiAction::AddCube));
+    fn ui_scales_hits_with_density() {
+        let s = scene(1);
+        for factor in [1, 2, 3] {
+            assert_eq!(
+                hit_test(
+                    960 * factor,
+                    540 * factor,
+                    30.0 * factor as f32,
+                    170.0 * factor as f32,
+                    &s,
+                    true
+                ),
+                Some(UiAction::SetTool(ToolMode::Move))
+            );
+        }
     }
-
     #[test]
-    fn outliner_rows_select_objects_by_index() {
-        let scene = scene_with_two_objects();
-        let action = hit_test(1280, 720, 1120.0, 122.0, &scene, true);
-        assert_eq!(action, Some(UiAction::SelectObject(0)));
+    fn viewport_is_not_intercepted() {
+        assert!(!is_ui_position(960, 540, 400.0, 250.0, true));
+        assert!(is_ui_position(960, 540, 30.0, 250.0, false));
+        assert!(!is_ui_position(960, 540, 900.0, 250.0, false));
     }
-
     #[test]
-    fn generated_overlay_vertices_are_finite_and_not_empty() {
-        let scene = scene_with_two_objects();
-        let vertices = build_vertices(
-            1280, 720, &scene, ToolMode::Move, false, true, "SAVED"
+    fn paged_outliner_can_reach_last_object() {
+        let s = scene(30);
+        let l = Layout::new(960, 540);
+        let first = l.first(&s);
+        assert!(first > 0);
+        assert_eq!(
+            hit_test(960, 540, 850.0, 140.0, &s, true),
+            Some(UiAction::SelectObject(first))
         );
-
-        assert!(!vertices.is_empty());
-        assert_eq!(vertices.len() % 5, 0);
-        assert!(vertices.iter().all(|value| value.is_finite()));
+        assert_eq!(
+            hit_test(960, 540, 740.0, 104.0, &s, true),
+            Some(UiAction::SelectObject(first - l.rows()))
+        );
     }
-
     #[test]
-    fn hidden_outliner_does_not_block_viewport_touches() {
-        assert!(!is_ui_position(1280, 720, 1100.0, 300.0, false));
-        assert!(is_ui_position(1280, 720, 20.0, 30.0, false));
+    fn invalid_touch_is_ignored() {
+        let s = scene(1);
+        for (x, y) in [(f32::NAN, 20.0), (-1.0, 1.0), (30.0, f32::INFINITY)] {
+            assert_eq!(hit_test(960, 540, x, y, &s, true), None);
+        }
+    }
+    #[test]
+    fn overlay_is_finite_on_phone_and_tablet() {
+        for (w, h) in [(960, 540), (2340, 1080), (1080, 2340), (1, 1)] {
+            let v = build_vertices(w, h, &scene(2), ToolMode::Move, false, true, "SAVED");
+            assert!(!v.is_empty());
+            assert_eq!(v.len() % 5, 0);
+            assert!(v.iter().all(|x| x.is_finite()));
+        }
+    }
+    #[test]
+    fn inspector_reset_has_own_hit_target() {
+        let l = Layout::new(960, 540);
+        assert_eq!(
+            hit_test(960, 540, 850.0, l.split + 180.0, &scene(1), true),
+            Some(UiAction::ResetTransform)
+        );
     }
 }
