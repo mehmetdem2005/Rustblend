@@ -8,6 +8,17 @@ user-visible failure, not a verified diagnosis of the device's driver.
 No logcat from that phone is available. Do not claim the phone is fixed on the
 basis of unit tests, compilation, or an x86 emulator.
 
+## Runtime failure reproduced and fixed
+
+Android 11 / SwiftShader run 43033919592 reached GPU startup and rejected
+`RUSTBLEND Grid and Selection Pipeline` with:
+`Depth bias is not compatible with non-triangle topology LineList`.
+The existing line pipeline configured constant=1 and slope_scale=1.0. wgpu
+validates this independently of the physical GPU. Use the default zero bias
+for lines. This explains a genuine pre-first-frame rendering failure that
+CPU unit tests and cargo check cannot detect. Re-run the emulator after this
+fix; do not distribute run 36's APK, which still contains the invalid bias.
+
 ## Confirmed code defects addressed
 
 - A failed GPU initialization previously left `renderer=None` and waited forever.

@@ -451,11 +451,9 @@ impl GpuRenderer {
                     depth_write_enabled: Some(false),
                     depth_compare: Some(wgpu::CompareFunction::LessEqual),
                     stencil: Default::default(),
-                    bias: wgpu::DepthBiasState {
-                        constant: 1,
-                        slope_scale: 1.0,
-                        clamp: 0.0,
-                    },
+                    // wgpu rejects depth bias on LineList. Nonzero bias used to
+                    // invalidate this pipeline before the first viewport frame.
+                    bias: wgpu::DepthBiasState::default(),
                 }),
                 multisample: wgpu::MultisampleState::default(),
                 multiview_mask: None,
