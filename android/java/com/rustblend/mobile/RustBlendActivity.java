@@ -59,10 +59,12 @@ public final class RustBlendActivity extends NativeActivity {
         content.addView(status);
         copy = new Button(this); copy.setText("Hata bilgisini kopyala");
         copy.setVisibility(View.GONE);
-        copy.setOnClickListener(v -> {
+        copy.setOnClickListener(new View.OnClickListener() {
+            @Override public void onClick(View v) {
             ClipboardManager clipboard = (ClipboardManager)getSystemService(CLIPBOARD_SERVICE);
             clipboard.setPrimaryClip(ClipData.newPlainText("RustBlend açılış raporu", details));
             copy.setText("Kopyalandı");
+            }
         });
         content.addView(copy);
         ScrollView scroll = new ScrollView(this);

@@ -6,7 +6,7 @@ APK="${1:-build/android-apk/RUSTBLEND.apk}"
 PACKAGE=com.rustblend.mobile
 ACTIVITY="$PACKAGE/.RustBlendActivity"
 mkdir -p build/smoke
-trap 'adb logcat -d > build/smoke/logcat.txt || true' EXIT
+trap 'adb logcat -d > build/smoke/logcat.txt || true; adb exec-out screencap -p > build/smoke/final-screen.png || true' EXIT
 adb install -r "$APK"
 adb shell settings put system accelerometer_rotation 0
 adb shell settings put system user_rotation 1
