@@ -1,21 +1,24 @@
 //! Explicit project operations are serialized and never coalesced like autosave.
 use std::{sync::mpsc::{self,Receiver,SyncSender},thread::{self,JoinHandle}};
 use crate::{project_catalog::{ProjectCatalog,ProjectEntry,ProjectId},workspace::WorkspaceState};
-pub enum ProjectJob { List, SaveCopy(WorkspaceState), Open(ProjectId,WorkspaceState), New(WorkspaceState) }
-pub struct ProjectResponse {pub entries:Vec<ProjectEntry>,pub workspace:Option<WorkspaceState>,pub message:String}
+pub enum ProjectJob { List, SaveCurrent(ProjectId,WorkspaceState), SaveCopy(WorkspaceState), Open(ProjectId,WorkspaceState), New(WorkspaceState) }
+pub struct ProjectResponse {pub entries:Vec<ProjectEntry>,pub workspace:Option<WorkspaceState>,pub message:String,pub active:Option<ProjectEntry>}
 pub struct ProjectService {sender:Option<SyncSender<ProjectJob>>,results:Receiver<Result<ProjectResponse,String>>,thread:Option<JoinHandle<()>>,busy:bool}
 fn execute(catalog:&mut ProjectCatalog,job:ProjectJob)->Result<ProjectResponse,String>{
+    let mut active=None;
     let (workspace,message)=match job {
         ProjectJob::List=>(None,"SAVE CREATES A NEW COPY".into()),
-        ProjectJob::SaveCopy(state)=>{let entry=catalog.save_copy(None,&state)?;(None,format!("SAVED {}",entry.name))},
+        ProjectJob::SaveCurrent(id,state)=>{let entry=catalog.save_current(id,&state)?;active=Some(entry.clone());(None,format!("SAVED {}",entry.name))},
+        ProjectJob::SaveCopy(state)=>{let entry=catalog.save_copy(None,&state)?;active=Some(entry.clone());(None,format!("SAVED {}",entry.name))},
         ProjectJob::Open(id,current)=>{
             let loaded=catalog.load(id)?;
+            active=catalog.list()?.into_iter().find(|entry|entry.id==id);
             // Fail closed: do not replace the live scene unless its backup commits.
             catalog.backup(&current)?;(Some(loaded),"OPENED - PREVIOUS WORK BACKED UP".into())
         },
         ProjectJob::New(current)=>{catalog.backup(&current)?;(Some(WorkspaceState::empty()),"NEW - PREVIOUS WORK BACKED UP".into())},
     };
-    Ok(ProjectResponse{entries:catalog.list()?,workspace,message})
+    Ok(ProjectResponse{entries:catalog.list()?,workspace,message,active})
 }
 impl ProjectService {
     pub fn new(mut catalog:ProjectCatalog,wake:impl Fn()+Send+'static)->Result<Self,String>{

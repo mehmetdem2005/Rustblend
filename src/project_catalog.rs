@@ -59,6 +59,26 @@ impl ProjectCatalog {
         let mut bytes=Vec::new();file.take(project::MAX_FILE_BYTES as u64+1).read_to_end(&mut bytes).map_err(|e|e.to_string())?;
         project::decode(&bytes).map(|(_,state)|state)
     }
+    /// Preserve the previous committed workspace before atomically replacing it.
+    pub fn save_current(&mut self,id:ProjectId,state:&WorkspaceState)->Result<ProjectEntry> {
+        let previous=self.load(id)?;
+        let mut original=File::open(self.path(id)).map_err(|e|e.to_string())?;
+        let name=Self::header(&mut original)?;
+        let bytes=project::encode(state,0)?;
+        self.backup(&previous)?;
+        let temp=self.directory.join("update.tmp");
+        let result=(||{
+            let mut file=File::create(&temp).map_err(|e|e.to_string())?;
+            file.write_all(MAGIC).and_then(|_|file.write_all(&(name.len() as u32).to_le_bytes()))
+                .and_then(|_|file.write_all(name.as_bytes())).and_then(|_|file.write_all(&bytes))
+                .and_then(|_|file.sync_all()).map_err(|e|e.to_string())?;
+            drop(file);
+            fs::rename(&temp,self.path(id)).map_err(|e|e.to_string())?;
+            File::open(&self.directory).and_then(|f|f.sync_all()).map_err(|e|e.to_string())?;
+            Ok(ProjectEntry{id,name})
+        })();
+        if result.is_err(){let _=fs::remove_file(temp);}result
+    }
     pub fn save_copy(&mut self,name:Option<&str>,state:&WorkspaceState)->Result<ProjectEntry> {
         self.save_named(name,"PROJECT",state)
     }
@@ -102,4 +122,7 @@ mod tests {
     #[test]fn damaged_file_can_be_listed_but_not_opened(){let d=Temp::new();let mut c=ProjectCatalog::open(d.0.clone()).unwrap();let e=c.save_copy(None,&state()).unwrap();fs::write(c.path(e.id),b"broken").unwrap();assert!(c.list().unwrap()[0].name.starts_with("UNREADABLE"));assert!(c.load(e.id).is_err());}
     #[test]fn failed_save_preserves_existing_file(){let d=Temp::new();let mut c=ProjectCatalog::open(d.0.clone()).unwrap();let s=state();let e=c.save_copy(None,&s).unwrap();fs::create_dir(d.0.join("pending.tmp")).unwrap();assert!(c.save_copy(None,&s).is_err());assert_eq!(c.load(e.id).unwrap().scene,s.scene);}
     #[test]fn old_temporary_file_is_ignored(){let d=Temp::new();fs::write(d.0.join("pending.tmp"),b"partial").unwrap();let mut c=ProjectCatalog::open(d.0.clone()).unwrap();assert!(c.list().unwrap().is_empty());assert!(c.save_copy(None,&state()).is_ok());}
+    #[test]fn saving_same_id_preserves_previous_version(){let d=Temp::new();let mut c=ProjectCatalog::open(d.0.clone()).unwrap();let old=state();let entry=c.save_copy(Some("Motor"),&old).unwrap();let mut edited=old.clone();edited.scene=Scene::new();assert_eq!(c.save_current(entry.id,&edited).unwrap(),entry);assert!(c.load(entry.id).unwrap().scene.is_empty());let backup=c.list().unwrap().into_iter().find(|e|e.id!=entry.id).unwrap();assert_eq!(c.load(backup.id).unwrap().scene,old.scene);}
+    #[test]fn failed_replacement_keeps_original(){let d=Temp::new();let mut c=ProjectCatalog::open(d.0.clone()).unwrap();let old=state();let entry=c.save_copy(None,&old).unwrap();fs::create_dir(d.0.join("update.tmp")).unwrap();assert!(c.save_current(entry.id,&old).is_err());assert_eq!(c.load(entry.id).unwrap().scene,old.scene);}
+
 }

@@ -44,6 +44,7 @@ struct RustBlendApp {
     frame_retry: FrameRetry,
     occluded: bool,
     projects: Option<crate::project_service::ProjectService>,
+    active_project: Option<crate::project_catalog::ProjectEntry>,
 }
 
 impl RustBlendApp {
@@ -62,6 +63,10 @@ impl RustBlendApp {
         };
         let job = match action {
             ProjectAction::Toggle => ProjectJob::List,
+            ProjectAction::SaveCurrent => match self.active_project.as_ref() {
+                Some(entry) => ProjectJob::SaveCurrent(entry.id,renderer.recovery_snapshot()),
+                None => ProjectJob::SaveCopy(renderer.recovery_snapshot()),
+            },
             ProjectAction::SaveCopy => ProjectJob::SaveCopy(renderer.recovery_snapshot()),
             ProjectAction::Open(id) => ProjectJob::Open(id,renderer.recovery_snapshot()),
             ProjectAction::New => ProjectJob::New(renderer.recovery_snapshot()),
@@ -80,6 +85,7 @@ impl RustBlendApp {
         match result {
             Ok(response) => {
                 let mut message = response.message;
+                let switching = response.workspace.is_some();
                 if let Some(state) = response.workspace {
                     if let Some(renderer) = self.renderer.as_mut() {
                         match renderer.open_project(&state) {
@@ -89,6 +95,12 @@ impl RustBlendApp {
                     } else {
                         self.suspended_workspace = Some(state); changed = true;
                     }
+                }
+                if !switching || changed {
+                    if switching || response.active.is_some() { self.active_project = response.active; }
+                }
+                if let Some(entry) = self.active_project.as_ref() {
+                    message = format!("{} | {}",entry.name,message);
                 }
                 if let Some(renderer) = self.renderer.as_mut() {
                     let panel = renderer.project_panel_mut();

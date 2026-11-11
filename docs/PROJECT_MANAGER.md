@@ -61,3 +61,14 @@ Device acceptance remains pending: save multiple scenes, load each, verify old
 work in BACKUP, New to empty scene, suspend during a project job, process restart,
 storage failure and actual private-filesystem hard-link support. No APK is
 produced for this source-only milestone.
+
+## Save the active project
+
+SAVE updates the currently opened project ID and keeps its name. Before atomic
+replacement, the previous committed workspace is saved as a separately openable
+BACKUP. Failed backup or write aborts the replacement. COPY still creates a new
+project and makes it active. NEW clears the active project. The active name is
+shown in the panel status after operations. Active identity is session-only for
+now: after process restart, recovered work is unnamed and SAVE creates a copy.
+A complete dirty indicator, persistent active identity, custom name input and
+explicit restore-version UI remain pending. Backups count toward the 256 limit.
