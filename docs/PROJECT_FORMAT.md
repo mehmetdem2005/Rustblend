@@ -9,7 +9,7 @@ A touch gesture ending (including camera navigation), cancellation, suspension,
 and a close request queue a save on a single background writer. Startup reads the newest valid generation.
 The footer shows NOT SAVED, SAVING, SAVED, SAVE FAILED, RESTORED or RECOVERY BLOCKED.
 An interrupted gesture may lose changes since the previous completed save.
-No UI exists yet for choosing named projects, importing or sharing these files.
+The PROJECTS panel now manages private named snapshots; see PROJECT_MANAGER.md. External file picking, importing and sharing are not yet implemented.
 Uninstall/clear app data deletes private recovery. The current temporary APK
 signing policy still makes upgrades problematic; private recovery is not an
 external backup and must not be described as one.

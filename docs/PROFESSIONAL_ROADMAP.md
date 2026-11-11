@@ -319,3 +319,15 @@ Testler: yavaş yazıcı sırasında yeni istek, bekleyenlerin birleştirilmesi,
 sonucun yeni isteği kaydedildi göstermemesi, hata sonrası tekrar kayıt, panic
 raporu, kapanışın son kaydı yazması ve dosyadan tekrar açılması; frame retry
 bütçesi ve iptali. APK bu pakette üretilmez.
+
+## Dördüncü paket — özel alanda proje yöneticisi
+
+PROJECTS paneli: SAVE COPY, NEW, sayfalı liste ve satırdan açma. PROJECT isimleri
+şimdilik otomatik atanır; kullanıcıdan isim alma/yeniden adlandırma henüz yoktur.
+Aç/yeni öncesinde mevcut sahne BACKUP olarak kalıcı kaydedilir; başarısızlıkta
+geçiş yapılmaz. Proje işleri ayrı tek-yazıcılı arka plan thread'inde yürür;
+işlem sürerken sahne girişi kapatılır. Mevcut autosave sistemi korunur.
+
+[Proje yöneticisi sözleşmesi](PROJECT_MANAGER.md): immutable dosyalar, 256 kayıt
+sınırı, güvenli yayınlama, testler ve cihaz doğrulaması. Silme/arşivleme, harici
+yedek, özel isim girişi ve APK kontrolü sonraki işlerdir.

@@ -7,7 +7,7 @@ use crate::frame_retry::FrameRetry;
 use std::time::Instant;
 
 #[derive(Debug)]
-enum AppEvent { RecoveryFinished }
+enum AppEvent { RecoveryFinished, ProjectsFinished }
 
 use winit::{
     application::ApplicationHandler,
@@ -43,9 +43,70 @@ struct RustBlendApp {
     recovery: Option<RecoveryWorker>,
     frame_retry: FrameRetry,
     occluded: bool,
+    projects: Option<crate::project_service::ProjectService>,
 }
 
 impl RustBlendApp {
+    fn project_action(&mut self, action: crate::project_ui::ProjectAction) {
+        use crate::project_ui::ProjectAction;
+        use crate::project_service::ProjectJob;
+        if matches!(action, ProjectAction::Ignore) { return; }
+        let Some(renderer) = self.renderer.as_mut() else { return; };
+        if matches!(action, ProjectAction::Toggle | ProjectAction::Previous | ProjectAction::Next | ProjectAction::Close) {
+            renderer.navigate_projects(action);
+            if action != ProjectAction::Toggle || !renderer.project_panel_mut().open { return; }
+        }
+        let Some(service) = self.projects.as_mut() else {
+            renderer.project_panel_mut().message = "PROJECT STORAGE UNAVAILABLE".into();
+            renderer.refresh_projects(); return;
+        };
+        let job = match action {
+            ProjectAction::Toggle => ProjectJob::List,
+            ProjectAction::SaveCopy => ProjectJob::SaveCopy(renderer.recovery_snapshot()),
+            ProjectAction::Open(id) => ProjectJob::Open(id,renderer.recovery_snapshot()),
+            ProjectAction::New => ProjectJob::New(renderer.recovery_snapshot()),
+            _ => return,
+        };
+        match service.submit(job) {
+            Ok(()) => renderer.project_panel_mut().busy = true,
+            Err(error) => renderer.project_panel_mut().message = error.to_uppercase(),
+        }
+        renderer.refresh_projects();
+    }
+
+    fn finish_project_job(&mut self) {
+        let Some(result) = self.projects.as_mut().and_then(|service| service.poll()) else { return; };
+        let mut changed = false;
+        match result {
+            Ok(response) => {
+                let mut message = response.message;
+                if let Some(state) = response.workspace {
+                    if let Some(renderer) = self.renderer.as_mut() {
+                        match renderer.open_project(&state) {
+                            Ok(()) => changed = true,
+                            Err(error) => { eprintln!("RUSTBLEND project open failed: {error}"); message = "OPEN FAILED - CURRENT WORK PRESERVED".into(); }
+                        }
+                    } else {
+                        self.suspended_workspace = Some(state); changed = true;
+                    }
+                }
+                if let Some(renderer) = self.renderer.as_mut() {
+                    let panel = renderer.project_panel_mut();
+                    panel.entries = response.entries; panel.message = message; panel.page = 0; panel.busy = false;
+                    renderer.refresh_projects();
+                }
+            }
+            Err(error) => {
+                eprintln!("RUSTBLEND project operation failed: {error}");
+                if let Some(renderer) = self.renderer.as_mut() {
+                    let panel = renderer.project_panel_mut(); panel.busy = false; panel.message = format!("FAILED: {}",error.to_uppercase());
+                    renderer.refresh_projects();
+                }
+            }
+        }
+        if changed { self.save_recovery(); }
+    }
+
     fn save_recovery(&mut self) {
         let Some(worker) = self.recovery.as_mut() else { return; };
         let snapshot = if let Some(renderer) = self.renderer.as_ref() {
@@ -81,6 +142,7 @@ impl RustBlendApp {
         id: u64,
         position: (f64, f64),
     ) {
+        if self.projects.as_ref().is_some_and(|service| service.busy()) { return; }
         match phase {
             TouchPhase::Started => {
                 if self.recovery.is_some() {
@@ -193,6 +255,9 @@ impl RustBlendApp {
             }
         }
 
+        if let Some(action) = self.renderer.as_mut().and_then(|renderer|renderer.take_project_action()) {
+            self.project_action(action);
+        }
         if self.touches.is_empty() && matches!(phase, TouchPhase::Ended | TouchPhase::Cancelled) {
             self.save_recovery();
         }
@@ -209,8 +274,11 @@ fn distance(a: (f64, f64), b: (f64, f64)) -> f64 {
 }
 
 impl ApplicationHandler<AppEvent> for RustBlendApp {
-    fn user_event(&mut self, _event_loop: &ActiveEventLoop, _event: AppEvent) {
-        self.refresh_recovery_status();
+    fn user_event(&mut self, _event_loop: &ActiveEventLoop, event: AppEvent) {
+        match event {
+            AppEvent::RecoveryFinished => self.refresh_recovery_status(),
+            AppEvent::ProjectsFinished => self.finish_project_job(),
+        }
     }
 
     fn about_to_wait(&mut self, event_loop: &ActiveEventLoop) {
@@ -292,6 +360,10 @@ impl ApplicationHandler<AppEvent> for RustBlendApp {
                 );
 
                 self.window = Some(window.clone());
+                if self.projects.as_ref().is_some_and(|service|service.busy()) {
+                    let panel = renderer.project_panel_mut(); panel.open = true; panel.busy = true;
+                    renderer.refresh_projects();
+                }
                 self.renderer = Some(renderer);
                 self.suspended_workspace = None;
                 self.touches.clear();
@@ -392,6 +464,7 @@ impl ApplicationHandler<AppEvent> for RustBlendApp {
 
 pub fn run(app: AndroidApp) {
     let recovery_path = app.internal_data_path().map(|p| p.join("projects"));
+    let catalog_path = app.internal_data_path().map(|p| p.join("named-projects"));
     let mut builder = EventLoop::<AppEvent>::with_user_event();
 
     builder.with_android_app(app);
@@ -419,6 +492,15 @@ pub fn run(app: AndroidApp) {
                 }
             }
             Err(error) => eprintln!("RUSTBLEND recovery disabled; existing files preserved: {error}"),
+        }
+    }
+
+    if let Some(path) = catalog_path {
+        let proxy = event_loop.create_proxy();
+        match crate::project_catalog::ProjectCatalog::open(path).and_then(|catalog|
+            crate::project_service::ProjectService::new(catalog, move || { let _ = proxy.send_event(AppEvent::ProjectsFinished); })) {
+            Ok(service) => application.projects = Some(service),
+            Err(error) => eprintln!("RUSTBLEND project storage unavailable: {error}"),
         }
     }
 

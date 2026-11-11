@@ -12,6 +12,11 @@ pub struct WorkspaceState {
 }
 
 impl WorkspaceState {
+    pub fn empty() -> Self {
+        Self { scene: Scene::new(), camera: Camera::new(crate::Vec3::ZERO, 6.2, 1.0).expect("valid default camera"),
+            tool: ToolMode::Orbit, edit_mode: false, outliner_open: true, history: Default::default() }
+    }
+
     /// Disk recovery never duplicates the in-memory undo stack.
     pub fn recovery_snapshot(&self) -> Self {
         Self { scene: self.scene.clone(), camera: self.camera, tool: self.tool,

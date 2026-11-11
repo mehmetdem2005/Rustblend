@@ -176,6 +176,8 @@ pub struct GpuRenderer {
     adapter_name: String,
     first_frame_presented: bool,
     recovery_status: &'static str,
+    project_panel: crate::project_ui::ProjectPanel,
+    project_action: Option<crate::project_ui::ProjectAction>,
 }
 
 impl GpuRenderer {
@@ -591,6 +593,8 @@ impl GpuRenderer {
             adapter_name,
             first_frame_presented: false,
             recovery_status: "NOT SAVED",
+            project_panel: Default::default(),
+            project_action: None,
         })
     }
 
@@ -635,6 +639,30 @@ impl GpuRenderer {
         if let Err(error) = self.refresh_ui_buffer() {
             eprintln!("RUSTBLEND: recovery status UI failed: {error}");
         }
+    }
+
+    pub fn take_project_action(&mut self) -> Option<crate::project_ui::ProjectAction> { self.project_action.take() }
+
+    pub fn project_panel_mut(&mut self) -> &mut crate::project_ui::ProjectPanel { &mut self.project_panel }
+
+    pub fn navigate_projects(&mut self, action: crate::project_ui::ProjectAction) {
+        self.project_panel.navigate(action, self.surface_config.height);
+        self.refresh_workspace(false);
+    }
+
+    pub fn refresh_projects(&mut self) { self.refresh_workspace(false); }
+
+    pub fn open_project(&mut self, state: &crate::workspace::WorkspaceState) -> Result<(), String> {
+        let mut previous = self.recovery_snapshot();
+        previous.history = self.history.clone();
+        if let Err(error) = self.restore_workspace(state) {
+            if let Err(rollback) = self.restore_workspace(&previous) {
+                eprintln!("RUSTBLEND GPU rollback failed: {rollback}");
+            }
+            return Err(error);
+        }
+        self.window.request_redraw();
+        Ok(())
     }
 
     pub fn adapter_name(&self) -> &str {
@@ -687,7 +715,7 @@ impl GpuRenderer {
     }
 
     fn refresh_ui_buffer(&mut self) -> Result<(), String> {
-        let vertices = viewport_ui::build_vertices(
+        let mut vertices = viewport_ui::build_vertices(
             self.surface_config.width,
             self.surface_config.height,
             &self.scene,
@@ -696,6 +724,8 @@ impl GpuRenderer {
             self.outliner_open,
             self.recovery_status,
         );
+
+        self.project_panel.draw(&mut vertices, self.surface_config.width, self.surface_config.height);
 
         if vertices.is_empty() || vertices.len() % 5 != 0 {
             return Err("Workspace UI generated invalid vertex data.".to_string());
@@ -780,6 +810,7 @@ impl GpuRenderer {
     }
 
     pub fn is_ui_position(&self, x: f32, y: f32) -> bool {
+        if self.project_panel.open { return true; }
         viewport_ui::is_ui_position(
             self.surface_config.width,
             self.surface_config.height,
@@ -790,6 +821,10 @@ impl GpuRenderer {
     }
 
     pub fn handle_ui_tap(&mut self, x: f32, y: f32) -> bool {
+        if self.project_panel.open {
+            self.project_action = Some(self.project_panel.hit(self.surface_config.width,self.surface_config.height,x,y));
+            return true;
+        }
         let Some(action) = viewport_ui::hit_test(
             self.surface_config.width,
             self.surface_config.height,
@@ -804,6 +839,7 @@ impl GpuRenderer {
         let edits_scene = matches!(action, UiAction::AddCube | UiAction::Duplicate | UiAction::Delete);
         if edits_scene { self.history.begin(&self.scene); }
         match action {
+            UiAction::Projects => { self.project_action = Some(crate::project_ui::ProjectAction::Toggle); }
             UiAction::Undo => {
                 self.history.undo(&mut self.scene);
                 self.refresh_workspace(true);

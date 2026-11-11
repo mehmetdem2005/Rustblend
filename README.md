@@ -159,3 +159,12 @@ snapshots coalesce to the latest workspace; SAVED is shown only for the latest
 completed request. Rendering is demand-driven while idle, with bounded delayed
 surface retries. Scene cloning remains on the UI thread; device performance is
 not yet measured. See [format and runtime behavior](docs/PROJECT_FORMAT.md).
+
+## Named project snapshots
+
+Open PROJECTS in the footer to SAVE COPY, start NEW, or tap a saved project to
+open it. Automatic PROJECT names are used for now. New/Open first commits a
+BACKUP of the current scene; failure aborts the switch. Operations run on a
+background worker and the panel reports errors. See [project manager behavior
+and limitations](docs/PROJECT_MANAGER.md). External file picking, user-entered
+names and project deletion are still pending.

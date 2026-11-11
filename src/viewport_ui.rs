@@ -25,6 +25,7 @@ impl ToolMode {
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum UiAction {
     Undo,
+    Projects,
     Redo,
     AddCube,
     Duplicate,
@@ -120,6 +121,7 @@ pub fn hit_test(
     if y >= height_px - FOOTER_HEIGHT {
         return Some(if x < 72.0 { UiAction::Undo }
             else if x < 144.0 { UiAction::Redo }
+            else if x < 256.0 { UiAction::Projects }
             else { UiAction::Ignore });
     }
 
@@ -323,7 +325,7 @@ pub fn build_vertices(
         [0.025, 0.033, 0.052],
     );
 
-    for (label, x) in [("UNDO", 12.0), ("REDO", 84.0)] {
+    for (label, x) in [("UNDO", 12.0), ("REDO", 84.0), ("PROJECTS", 152.0)] {
         text(&mut vertices, width_px, height_px, label, x,
             height_px - 20.0, 2.0, [0.94, 0.96, 1.0]);
     }
@@ -350,7 +352,7 @@ pub fn build_vertices(
         width_px,
         height_px,
         &status,
-        156.0,
+        268.0,
         height_px - 9.0,
         1.0,
         [0.68, 0.75, 0.86],
@@ -359,7 +361,7 @@ pub fn build_vertices(
     vertices
 }
 
-fn rect(
+pub(crate) fn rect(
     output: &mut Vec<f32>,
     width: f32,
     height: f32,
@@ -397,7 +399,7 @@ fn triangle(
     }
 }
 
-fn text(
+pub(crate) fn text(
     output: &mut Vec<f32>,
     width: f32,
     height: f32,
