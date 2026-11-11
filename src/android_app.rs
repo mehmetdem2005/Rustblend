@@ -330,7 +330,7 @@ impl ApplicationHandler<AppEvent> for RustBlendApp {
             Ok(window) => Arc::new(window),
 
             Err(error) => {
-                eprintln!("RUSTBLEND: Android window creation failed: {error}");
+                crate::startup::error(&format!("Android ekranı oluşturulamadı: {error}"));
                 event_loop.exit();
                 return;
             }
@@ -344,9 +344,7 @@ impl ApplicationHandler<AppEvent> for RustBlendApp {
 
         let renderer_attempt = std::panic::catch_unwind(
             std::panic::AssertUnwindSafe(|| {
-                let mut renderer = pollster::block_on(
-                    GpuRenderer::new(display, window.clone())
-                )?;
+                let mut renderer = GpuRenderer::new(display, window.clone())?;
                 if let Some(saved) = self.suspended_workspace.as_ref() {
                     renderer.restore_workspace(saved)?;
                 }
@@ -399,7 +397,7 @@ impl ApplicationHandler<AppEvent> for RustBlendApp {
             }
 
             Err(error) => {
-                eprintln!("RUSTBLEND: Modeling workspace initialization failed: {error}");
+                crate::startup::error(&format!("Grafik başlatılamadı:\n{error}"));
 
                 window.set_title("RUSTBLEND - SAFE VIEWPORT MODE");
 
@@ -474,8 +472,14 @@ impl ApplicationHandler<AppEvent> for RustBlendApp {
                 if let Some(renderer) = self.renderer.as_mut() {
                     match renderer.render() {
                         FrameResult::Presented => self.frame_retry.reset(),
-                        FrameResult::Retry => self.frame_retry.failed(Instant::now()),
+                        FrameResult::Retry => {
+                            self.frame_retry.failed(Instant::now());
+                            if self.frame_retry.deadline().is_none() {
+                                crate::startup::error("Ekrandan görüntü alınamadı: yeniden deneme sınırına ulaşıldı.");
+                            }
+                        }
                         FrameResult::Unavailable => self.frame_retry.clear(),
+                        FrameResult::Failed => self.frame_retry.clear(),
                     }
                 }
             }
@@ -486,6 +490,12 @@ impl ApplicationHandler<AppEvent> for RustBlendApp {
 }
 
 pub fn run(app: AndroidApp) {
+    crate::startup::init(app.internal_data_path().as_deref());
+    let previous_hook = std::panic::take_hook();
+    std::panic::set_hook(Box::new(move |info| {
+        crate::startup::error(&format!("Native hata: {info}"));
+        previous_hook(info);
+    }));
     let recovery_path = app.internal_data_path().map(|p| p.join("projects"));
     let catalog_path = app.internal_data_path().map(|p| p.join("named-projects"));
     let mut builder = EventLoop::<AppEvent>::with_user_event();
@@ -496,7 +506,7 @@ pub fn run(app: AndroidApp) {
         Ok(event_loop) => event_loop,
 
         Err(error) => {
-            eprintln!("RUSTBLEND: Android event loop creation failed: {error}");
+            crate::startup::error(&format!("Android olay döngüsü oluşturulamadı: {error}"));
             return;
         }
     };

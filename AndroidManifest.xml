@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     package="com.rustblend.mobile"
-    android:versionCode="6"
-    android:versionName="0.5.0">
+    android:versionCode="7"
+    android:versionName="0.5.1">
 
     <uses-sdk
         android:minSdkVersion="23"
@@ -10,14 +10,14 @@
 
     <application
         android:label="RUSTBLEND"
-        android:hasCode="false"
+        android:hasCode="true"
         android:allowBackup="false"
         android:debuggable="true"
         android:extractNativeLibs="false"
         android:theme="@android:style/Theme.Material.NoActionBar">
 
         <activity
-            android:name="android.app.NativeActivity"
+            android:name="com.rustblend.mobile.RustBlendActivity"
             android:label="RUSTBLEND"
             android:exported="true"
             android:screenOrientation="unspecified"

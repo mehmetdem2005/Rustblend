@@ -46,3 +46,5 @@ pub mod frame_retry;
 pub mod project_catalog;
 pub mod project_service;
 pub mod project_ui;
+
+pub mod startup;

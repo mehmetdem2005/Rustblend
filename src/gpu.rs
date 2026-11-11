@@ -135,7 +135,7 @@ const LINE_ATTRIBUTES: [wgpu::VertexAttribute; 2] = [
     },
 ];
 
-pub enum FrameResult { Presented, Retry, Unavailable }
+pub enum FrameResult { Presented, Retry, Unavailable, Failed }
 
 pub struct GpuRenderer {
     instance: wgpu::Instance,
@@ -175,17 +175,42 @@ pub struct GpuRenderer {
     window: Arc<Window>,
     adapter_name: String,
     first_frame_presented: bool,
+    device_error: Arc<std::sync::Mutex<Option<String>>>,
     recovery_status: &'static str,
     project_panel: crate::project_ui::ProjectPanel,
     project_action: Option<crate::project_ui::ProjectAction>,
 }
 
 impl GpuRenderer {
-    pub async fn new(
+    pub fn new(display: OwnedDisplayHandle, window: Arc<Window>) -> Result<Self, String> {
+        // A combined instance only falls back during adapter selection, not when
+        // device/surface/pipeline initialization fails. Try complete independent
+        // renderers so older Android Vulkan drivers cannot strand startup.
+        let mut failures = Vec::new();
+        for (name, backend) in [("OpenGL ES", wgpu::Backends::GL), ("Vulkan", wgpu::Backends::VULKAN)] {
+            crate::startup::stage(&format!("{name}: grafik sürücüsü başlatılıyor"));
+            let attempt = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+                pollster::block_on(Self::new_backend(display.clone(), window.clone(), backend))
+            }));
+            match attempt {
+                Ok(Ok(renderer)) => return Ok(renderer),
+                Ok(Err(error)) => failures.push(format!("{name}: {error}")),
+                Err(payload) => {
+                    let message = payload.downcast_ref::<String>().map(String::as_str)
+                        .or_else(|| payload.downcast_ref::<&str>().copied()).unwrap_or("GPU initialization panic");
+                    failures.push(format!("{name}: {message}"));
+                }
+            }
+        }
+        Err(failures.join("\n\n"))
+    }
+
+    async fn new_backend(
         display: OwnedDisplayHandle,
         window: Arc<Window>,
+        backend: wgpu::Backends,
     ) -> Result<Self, String> {
-        eprintln!("RUSTBLEND GPU: creating Vulkan + GLES instance.");
+        eprintln!("RUSTBLEND GPU: creating {backend:?} instance.");
 
         let mut instance_desc =
             wgpu::InstanceDescriptor::new_with_display_handle(
@@ -193,7 +218,7 @@ impl GpuRenderer {
             );
 
         instance_desc.backends =
-            wgpu::Backends::VULKAN | wgpu::Backends::GL;
+            backend;
 
         let instance = wgpu::Instance::new(instance_desc);
 
@@ -226,16 +251,28 @@ impl GpuRenderer {
 
         eprintln!("RUSTBLEND GPU: selected adapter {adapter_name}.");
 
+        crate::startup::stage(&format!("{adapter_name}: uyumlu grafik aygıtı hazırlanıyor"));
+        let limits = wgpu::Limits::downlevel_webgl2_defaults()
+            .using_resolution(adapter.limits()).using_alignment(adapter.limits());
         let (device, queue) = adapter
-            .request_device(&wgpu::DeviceDescriptor::default())
+            .request_device(&wgpu::DeviceDescriptor {
+                label: Some("RustBlend mobile device"),
+                required_limits: limits,
+                ..Default::default()
+            })
             .await
             .map_err(|error| {
                 format!("GPU device creation failed: {error}")
             })?;
 
-        device.on_uncaptured_error(Arc::new(|error| {
-            eprintln!("RUSTBLEND GPU UNCAPTURED ERROR: {error}");
+        let device_error = Arc::new(std::sync::Mutex::new(None));
+        let error_sink = device_error.clone();
+        device.on_uncaptured_error(Arc::new(move |error| {
+            let message = format!("GPU: {error}");
+            crate::startup::error(&message);
+            *error_sink.lock().unwrap_or_else(|e| e.into_inner()) = Some(message);
         }));
+        let startup_scope = device.push_error_scope(wgpu::ErrorFilter::Validation);
 
         eprintln!("RUSTBLEND GPU: device ready; uncaptured GPU errors will be logged.");
 
@@ -250,6 +287,7 @@ impl GpuRenderer {
             })?;
 
         surface_config.present_mode = wgpu::PresentMode::Fifo;
+        crate::startup::stage(&format!("{adapter_name}: ekran yüzeyi ve çizim programları hazırlanıyor"));
         surface.configure(&device, &surface_config);
 
         let mut camera = Camera::new(
@@ -472,8 +510,7 @@ impl GpuRenderer {
 
         let ui_pipeline = match ui_validation_scope.pop().await {
             Some(error) => {
-                eprintln!("RUSTBLEND GPU: workspace UI pipeline disabled: {error}");
-                None
+                return Err(format!("Workspace UI pipeline: {error}"));
             }
             None => {
                 eprintln!("RUSTBLEND GPU: workspace UI pipeline ready.");
@@ -560,7 +597,15 @@ impl GpuRenderer {
             grid_vertex_count
         );
 
+        if let Some(error) = startup_scope.pop().await {
+            return Err(format!("GPU startup validation: {error}"));
+        }
+        if let Some(error) = device_error.lock().unwrap_or_else(|e| e.into_inner()).clone() {
+            return Err(error);
+        }
+        crate::startup::stage(&format!("{adapter_name}: ilk görüntü bekleniyor"));
         Ok(Self {
+            device_error,
             instance,
             surface,
             surface_config,
@@ -1044,6 +1089,9 @@ impl GpuRenderer {
     }
 
     pub fn render(&mut self) -> FrameResult {
+        if self.device_error.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+            return FrameResult::Failed;
+        }
         let frame = match self.surface.get_current_texture() {
             wgpu::CurrentSurfaceTexture::Success(frame)
             | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
@@ -1083,8 +1131,8 @@ impl GpuRenderer {
             }
 
             wgpu::CurrentSurfaceTexture::Validation => {
-                eprintln!("RUSTBLEND GPU: surface validation failed.");
-                return FrameResult::Unavailable;
+                crate::startup::error("Ekran yüzeyi doğrulaması başarısız oldu.");
+                return FrameResult::Failed;
             }
         };
 
@@ -1182,7 +1230,11 @@ impl GpuRenderer {
         self.window.pre_present_notify();
         self.queue.present(frame);
 
+        if self.device_error.lock().unwrap_or_else(|e| e.into_inner()).is_some() {
+            return FrameResult::Failed;
+        }
         if !self.first_frame_presented {
+            crate::startup::ready(&self.adapter_name);
             eprintln!("RUSTBLEND GPU: first 3D viewport frame presented.");
             self.first_frame_presented = true;
         }
