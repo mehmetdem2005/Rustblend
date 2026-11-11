@@ -45,6 +45,7 @@ struct RustBlendApp {
     occluded: bool,
     projects: Option<crate::project_service::ProjectService>,
     active_project: Option<crate::project_catalog::ProjectEntry>,
+    saved_project_scene: Option<crate::Scene>,
 }
 
 impl RustBlendApp {
@@ -86,6 +87,7 @@ impl RustBlendApp {
             Ok(response) => {
                 let mut message = response.message;
                 let switching = response.workspace.is_some();
+                let saved_or_opened = response.active.is_some();
                 if let Some(state) = response.workspace {
                     if let Some(renderer) = self.renderer.as_mut() {
                         match renderer.open_project(&state) {
@@ -97,10 +99,19 @@ impl RustBlendApp {
                     }
                 }
                 if !switching || changed {
-                    if switching || response.active.is_some() { self.active_project = response.active; }
+                    if switching || saved_or_opened {
+                        self.active_project = response.active;
+                        self.saved_project_scene = if self.active_project.is_some() {
+                            self.renderer.as_ref().map(|renderer|renderer.recovery_snapshot().scene)
+                                .or_else(||self.suspended_workspace.as_ref().map(|state|state.scene.clone()))
+                        } else { None };
+                    }
                 }
                 if let Some(entry) = self.active_project.as_ref() {
-                    message = format!("{} | {}",entry.name,message);
+                    let current = self.renderer.as_ref().map(|renderer|renderer.recovery_snapshot().scene)
+                        .or_else(||self.suspended_workspace.as_ref().map(|state|state.scene.clone()));
+                    let dirty = current.as_ref() != self.saved_project_scene.as_ref();
+                    message = format!("{}{} | {}",entry.name,if dirty {" - UNSAVED"} else {""},message);
                 }
                 if let Some(renderer) = self.renderer.as_mut() {
                     let panel = renderer.project_panel_mut();
