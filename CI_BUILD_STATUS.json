@@ -1,11 +1,11 @@
 {
   "status": "success",
-  "run_id": 42893296216,
-  "run_number": 25,
-  "run_url": "https://github.com/mehmetdem2005/Rustblend/actions/runs/42893296216",
-  "source_commit": "ff1665ddff6e0d1d315a58463d80768b50d80f8b",
-  "artifact_id": 13798688461,
-  "artifact_name": "RUSTBLEND-Android-APK-25",
+  "run_id": 43029320614,
+  "run_number": 34,
+  "run_url": "https://github.com/mehmetdem2005/Rustblend/actions/runs/43029320614",
+  "source_commit": "3f2f3ce21690b2d4f7adeb7a783b73b9aef428aa",
+  "artifact_id": 13859028098,
+  "artifact_name": "RUSTBLEND-Android-APK-34",
   "apk_file": "RUSTBLEND.apk",
   "retention_days": 14
 }
