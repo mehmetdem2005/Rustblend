@@ -1,6 +1,6 @@
 # Private project manager — first usable snapshot workflow
 
-Open **PROJECTS** in the viewport footer. **SAVE COPY** writes a separate immutable
+Open **PROJECTS** in the viewport footer. **SAVE** updates the active project after backing up its previous version. **COPY** writes a separate
 snapshot, **NEW** opens an empty scene, and tapping a project row loads it. PREV
 and NEXT paginate the list; CLOSE returns to the viewport. While an operation is
 running, scene input is blocked so an asynchronous load cannot discard edits
@@ -10,8 +10,7 @@ Names are currently automatic: PROJECT 0001, PROJECT 0002, etc. BACKUP entries
 are created before a successful New/Open transition and are also openable. The
 catalog API accepts UTF-8 display names, but a rename/name-entry UI is not yet
 implemented. This avoids pretending the current bitmap UI is a complete text
-input system. A saved copy is not an active linked document: subsequent edits
-are captured by autosave; SAVE COPY creates another named snapshot.
+input system. Opening or copying a project makes it active for this session. SAVE updates that project; COPY creates another named snapshot. Opening the panel shows UNSAVED when the scene differs from its last named save.
 
 ## Data and failure behavior
 
@@ -23,7 +22,7 @@ are captured by autosave; SAVE COPY creates another named snapshot.
   history. The independently saved BACKUP remains available as well.
 - A file is written and synced as pending.tmp, atomically published with a
   no-clobber hard link, then the temporary link is removed and the directory
-  synced. Existing named projects are never overwritten.
+  synced. COPY never overwrites existing projects. SAVE backs up the previous valid workspace, writes and syncs update.tmp, then atomically renames it over the active file.
 - This relies on Android private-filesystem hard-link support; unsupported
   filesystems fail without replacing the live scene. This is not a SAF exporter.
 - IDs, not user names, generate paths. Unicode names and path-like display text
@@ -70,5 +69,5 @@ BACKUP. Failed backup or write aborts the replacement. COPY still creates a new
 project and makes it active. NEW clears the active project. The active name is
 shown in the panel status after operations. Active identity is session-only for
 now: after process restart, recovered work is unnamed and SAVE creates a copy.
-A complete dirty indicator, persistent active identity, custom name input and
+The panel shows scene changes as UNSAVED; camera-only changes are not included. Persistent active identity, custom name input and
 explicit restore-version UI remain pending. Backups count toward the 256 limit.
